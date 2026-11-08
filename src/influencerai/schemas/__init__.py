@@ -1,0 +1,1 @@
+"""Validated data models used by pipeline stages."""

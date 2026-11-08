@@ -1,0 +1,91 @@
+﻿name: Generate and upload Short
+
+on:
+  schedule:
+    # 12:15 and 18:45 IST (UTC+5:30)
+    - cron: "45 6 * * *"
+    - cron: "15 13 * * *"
+  workflow_dispatch:
+    inputs:
+      privacy:
+        description: "YouTube privacy status"
+        default: "public"
+        type: choice
+        options: [public, unlisted, private]
+      upload:
+        description: "Upload to YouTube"
+        default: true
+        type: boolean
+
+concurrency:
+  group: shorts-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OUTPUT_DIRECTORY: output
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install fonts for captions
+        run: sudo apt-get update && sudo apt-get install -y fontconfig fonts-liberation
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Restore topic history
+        uses: actions/cache/restore@v4
+        with:
+          path: output/topic-history.json
+          key: topic-history-${{ github.run_id }}
+          restore-keys: topic-history-
+
+      - name: Write YouTube token
+        env:
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+        run: |
+          mkdir -p credentials
+          printf '%s' "$YOUTUBE_TOKEN_JSON" > credentials/youtube_token.json
+
+      - name: Generate and upload video
+        run: |
+          ARGS="--image-provider openai --tts-provider openai --tts-voice marin"
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.upload }}" = "true" ]; then
+            ARGS="$ARGS --upload --youtube-privacy ${{ inputs.privacy || 'public' }}"
+          fi
+          uv run python main.py $ARGS
+
+      - name: Save topic history
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/topic-history.json
+          key: topic-history-${{ github.run_id }}
+
+      - name: Remove token
+        if: always()
+        run: rm -f credentials/youtube_token.json
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-artifacts
+          path: |
+            output/**/*.json
+            output/**/*.txt
+            output/**/*.md
+            logs/
+          retention-days: 7
+          if-no-files-found: ignore

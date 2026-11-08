@@ -1,0 +1,12 @@
+Bundled sound-effects library
+Downloaded: 2026-11-07
+
+| Local file stem (use as screenplay sound_effect) | Mixkit sound | Direct source |
+|---|---|---|
+| fast-rocket-whoosh | “Fast rocket whoosh” (4 s) | https://assets.mixkit.co/active_storage/sfx/667/667.wav |
+| fast-sweep-transition | “Fast small sweep transition” (1 s) | https://assets.mixkit.co/active_storage/sfx/1000/1000.wav |
+| cinematic-swoosh-heartbeat | “Cinematic transition swoosh heartbeat trailer” (8 s) | https://assets.mixkit.co/active_storage/sfx/2909/2909.wav |
+| cinematic-tunnel-whoosh | “Cinematic tunnel reverb woosh” (6 s) | https://assets.mixkit.co/active_storage/sfx/2290/2290.wav |
+
+License: Mixkit Sound Effects Free License — https://mixkit.co/license/#sfxFree
+Mixkit's license page says the free-license effects may be used in commercial and non-commercial projects, including YouTube videos, social-media posts, marketing, and filmmaking. The license does not permit standalone redistribution, claiming the effects as your own, or registering them with a rights-management service. Review Mixkit's current license and terms before publishing or monetizing.

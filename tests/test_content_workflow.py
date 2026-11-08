@@ -1,0 +1,552 @@
+"""No-network tests for the multi-agent approval gate and video handoff."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import tempfile
+import unittest
+from dataclasses import replace
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import Mock
+
+from influencerai.config.settings import Settings
+from influencerai.pipeline.content_workflow import (
+    AgentBundle,
+    _invoke_with_retries,
+    _is_repeated_topic,
+    _load_topic_history,
+    _save_topic_history,
+    _topic_genre,
+    _topic_title,
+    _validate_trend_evidence,
+    run_content_workflow,
+)
+from influencerai.schemas.review import ScreenplayReview
+from influencerai.schemas.screenplay import Screenplay
+
+
+def screenplay_payload(scene_count: int = 5, *, words_per_scene: int = 5) -> dict:
+    return {
+        "video_title": "Reviewed Pipeline Story",
+        "target_duration": 26,
+        "aspect_ratio": "9:16",
+        "scenes": [
+            {
+                "scene_id": scene_id,
+                "duration": 26 / scene_count,
+                "voiceover": " ".join([f"scene{scene_id}"] * words_per_scene),
+                "image_prompt": f"A specific cinematic scene {scene_id}.",
+                "motion": "subtle_zoom",
+            }
+            for scene_id in range(1, scene_count + 1)
+        ],
+    }
+
+
+def approved_review(decision: str = "approve", required_changes: list[str] | None = None) -> dict:
+    return {
+        "decision": decision,
+        "overall_score": 8.1 if decision == "approve" else 6.4,
+        "critical_failure": False,
+        "score_breakdown": {
+            "hook": 8,
+            "storytelling": 8,
+            "retention": 8,
+            "visual_potential": 8,
+            "narration": 8,
+            "payoff": 8,
+            "originality": 8,
+        },
+        "strongest_elements": ["Clear story progression."],
+        "biggest_problems": [],
+        "retention_risks": [],
+        "factual_issues": [],
+        "required_changes": required_changes if required_changes is not None else (
+            [] if decision == "approve" else ["Strengthen the opening hook."]
+        ),
+        "final_recommendation": "Ready for generation." if decision == "approve" else "Revise before generation.",
+    }
+
+
+def current_topic_opportunity(title: str = "A verified current story opportunity", genre: str = "science and space") -> str:
+    today = datetime.now().astimezone().date().isoformat()
+    return (
+        f"TOPIC: {title}\n\n"
+        f"GENRE: {genre}\n\n"
+        "TREND EVIDENCE:\n"
+        f"- Current independent coverage dated {today} shows renewed interest.\n\n"
+        "SOURCES:\n- Independent coverage: https://example.com/current-story\n"
+    )
+
+
+class ContentWorkflowTests(unittest.TestCase):
+    def run_workflow(self, decision: str):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        root = Path(temp_dir.name)
+        settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+        bundle = AgentBundle(object(), object(), object(), object())
+        responses = [
+            current_topic_opportunity(),
+            "RESEARCH: Verified source-backed facts",
+            Screenplay.model_validate(screenplay_payload()),
+            ScreenplayReview.model_validate(approved_review(decision)),
+        ]
+
+        async def fake_agent_runner(agent, prompt):
+            return responses.pop(0)
+
+        video_generator = Mock()
+        video_generator.return_value = root / "output" / "final.mp4"
+        result = asyncio.run(
+            run_content_workflow(
+                settings=settings,
+                agents=bundle,
+                agent_runner=fake_agent_runner,
+                video_generator=video_generator,
+            )
+        )
+        return result, video_generator
+
+    def test_explicit_approval_generates_video_from_saved_screenplay(self) -> None:
+        result, video_generator = self.run_workflow("approve")
+        video_generator.assert_called_once()
+        screenplay_path = video_generator.call_args.args[0]
+        self.assertEqual(screenplay_path, result.screenplay_path)
+        self.assertTrue(screenplay_path.is_file())
+        self.assertEqual(json.loads(screenplay_path.read_text(encoding="utf-8"))["video_title"], "Reviewed Pipeline Story")
+        self.assertTrue((result.run_directory / "review.json").is_file())
+        self.assertEqual(result.video_path, video_generator.return_value)
+
+    def test_india_audience_context_is_applied_to_every_agent_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            responses = [
+                current_topic_opportunity(),
+                "RESEARCH: Verified source-backed facts",
+                Screenplay.model_validate(screenplay_payload()),
+                ScreenplayReview.model_validate(approved_review()),
+            ]
+            prompts = []
+
+            async def fake_agent_runner(agent, prompt):
+                prompts.append(prompt)
+                return responses.pop(0)
+
+            asyncio.run(
+                run_content_workflow(
+                    settings=settings,
+                    agents=bundle,
+                    agent_runner=fake_agent_runner,
+                    video_generator=Mock(return_value=root / "final.mp4"),
+                )
+            )
+
+        self.assertEqual(len(prompts), 4)
+        for prompt in prompts:
+            self.assertIn("primary audience", prompt)
+            self.assertIn("India", prompt)
+        self.assertIn("English by default", prompts[2])
+
+    def test_agent_runner_retries_transient_failures_only(self) -> None:
+        class TemporaryAgentFailure(Exception):
+            pass
+
+        calls = 0
+
+        async def unstable_agent(agent, prompt):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise TemporaryAgentFailure("temporary network issue")
+            return "recovered"
+
+        result = asyncio.run(
+            _invoke_with_retries(
+                unstable_agent,
+                object(),
+                "prompt",
+                retryable_errors=(TemporaryAgentFailure,),
+                retry_delay_seconds=0,
+            )
+        )
+        self.assertEqual(result, "recovered")
+        self.assertEqual(calls, 2)
+
+        calls = 0
+
+        async def permanent_failure(agent, prompt):
+            nonlocal calls
+            calls += 1
+            raise ValueError("invalid agent output")
+
+        with self.assertRaisesRegex(ValueError, "invalid agent output"):
+            asyncio.run(
+                _invoke_with_retries(
+                    permanent_failure,
+                    object(),
+                    "prompt",
+                    retryable_errors=(TemporaryAgentFailure,),
+                    retry_delay_seconds=0,
+                )
+            )
+        self.assertEqual(calls, 1)
+
+    def test_topic_history_bootstraps_from_existing_run_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "output"
+            run = output_root / "content-runs" / "old-run"
+            run.mkdir(parents=True)
+            (run / "topic-generator-output.md").write_text(
+                "```json\nTOPIC:\nA surprising wildlife migration\n",
+                encoding="utf-8",
+            )
+            history = _load_topic_history(output_root)
+        self.assertEqual(history, [{"topic": "A surprising wildlife migration", "genre": "nature and wildlife"}])
+
+    def test_persisted_history_is_not_reordered_by_older_run_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "output"
+            old_run = output_root / "content-runs" / "old-run"
+            old_run.mkdir(parents=True)
+            (old_run / "topic-generator-output.md").write_text("TOPIC:\nAn old topic\n", encoding="utf-8")
+            current_history = [{"topic": "The latest selected topic", "genre": "science and space"}]
+            _save_topic_history(output_root, current_history)
+
+            self.assertEqual(_load_topic_history(output_root), current_history)
+
+    def test_topic_title_parser_handles_multiline_heading_and_genre_inference(self) -> None:
+        topic = "TOPIC:\nNASA's Swift Space Telescope's Uncontrolled Reentry\n"
+        self.assertEqual(_topic_title(topic), "NASA's Swift Space Telescope's Uncontrolled Reentry")
+        self.assertEqual(_topic_genre(topic), "science and space")
+
+    def test_topic_repeat_detection_catches_reworded_same_event(self) -> None:
+        previous = "The Impact of the 2026 Midterm Elections on AI Regulation and Data Center Development"
+        candidate = "The Impact of the Democrats' Midterm Victory on the AI Industry"
+        self.assertTrue(_is_repeated_topic(candidate, [previous]))
+
+    def test_repeated_topic_is_reselected_and_history_passed_to_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            repeated = current_topic_opportunity("A surprising wildlife migration", "nature and wildlife")
+            fresh = current_topic_opportunity("A newly documented deep sea species", "science and space")
+            responses = [
+                repeated,
+                "RESEARCH: Verified source-backed facts",
+                Screenplay.model_validate(screenplay_payload()),
+                ScreenplayReview.model_validate(approved_review()),
+            ]
+            prompts = []
+            topic_calls = 0
+
+            async def fake_agent_runner(agent, prompt):
+                nonlocal topic_calls
+                prompts.append(prompt)
+                if agent is bundle.topic_generator:
+                    topic_calls += 1
+                    return repeated if topic_calls == 1 else fresh
+                return responses.pop(0)
+
+            # Seed persistent history as if the first topic had been produced by an earlier run.
+            history_root = settings.output_directory
+            (history_root / "content-runs" / "old-run").mkdir(parents=True)
+            (history_root / "content-runs" / "old-run" / "topic-generator-output.md").write_text(
+                repeated,
+                encoding="utf-8",
+            )
+
+            result = asyncio.run(
+                run_content_workflow(
+                    settings=settings,
+                    agents=bundle,
+                    agent_runner=fake_agent_runner,
+                    video_generator=Mock(return_value=root / "final.mp4"),
+                )
+            )
+
+            topic_prompts = [prompt for prompt in prompts if "Find one currently trending" in prompt or "previous topic candidate" in prompt]
+            self.assertEqual(len(topic_prompts), 2)
+            self.assertIn("A surprising wildlife migration", topic_prompts[0])
+            self.assertIn("different appropriate genre", topic_prompts[1])
+            saved_topic = (result.run_directory / "topic-generator-output.md").read_text(encoding="utf-8")
+            self.assertIn("A newly documented deep sea species", saved_topic)
+
+    def test_invalid_screenplay_output_is_retried_with_validation_feedback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            responses = [
+                current_topic_opportunity(),
+                "RESEARCH: Verified source-backed facts",
+                "not valid screenplay json",
+                Screenplay.model_validate(screenplay_payload()),
+                ScreenplayReview.model_validate(approved_review()),
+            ]
+            prompts = []
+
+            async def fake_agent_runner(agent, prompt):
+                prompts.append(prompt)
+                return responses.pop(0)
+
+            video_generator = Mock(return_value=root / "output" / "final.mp4")
+            result = asyncio.run(
+                run_content_workflow(
+                    settings=settings,
+                    agents=bundle,
+                    agent_runner=fake_agent_runner,
+                    video_generator=video_generator,
+                )
+            )
+
+            video_generator.assert_called_once()
+            self.assertIn("validation issues", prompts[3])
+            self.assertTrue((result.run_directory / "screenplay-attempt-01-invalid.txt").is_file())
+            self.assertTrue(result.screenplay_path.is_file())
+
+    def test_invalid_reviewer_output_is_retried_with_schema_feedback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            valid_review = ScreenplayReview.model_validate(approved_review())
+            responses = [
+                current_topic_opportunity(),
+                "RESEARCH: Verified source-backed facts",
+                Screenplay.model_validate(screenplay_payload()),
+                "not valid review json",
+                valid_review,
+            ]
+            prompts = []
+
+            async def fake_agent_runner(agent, prompt):
+                prompts.append(prompt)
+                return responses.pop(0)
+
+            video_generator = Mock(return_value=root / "output" / "final.mp4")
+            result = asyncio.run(
+                run_content_workflow(
+                    settings=settings,
+                    agents=bundle,
+                    agent_runner=fake_agent_runner,
+                    video_generator=video_generator,
+                )
+            )
+
+            video_generator.assert_called_once()
+            self.assertIn("Correct the validation issues", prompts[4])
+            self.assertTrue((result.run_directory / "review-attempt-01-invalid.txt").is_file())
+            self.assertEqual(result.review.decision, "approve")
+
+    def test_approval_with_advisory_required_changes_still_generates_video(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        root = Path(temp_dir.name)
+        settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+        bundle = AgentBundle(object(), object(), object(), object())
+        responses = [
+            current_topic_opportunity(),
+            "RESEARCH: Verified source-backed facts",
+            Screenplay.model_validate(screenplay_payload()),
+            ScreenplayReview.model_validate(
+                approved_review(required_changes=["Confirm stock metrics before publication."])
+            ),
+        ]
+
+        async def fake_agent_runner(agent, prompt):
+            return responses.pop(0)
+
+        video_generator = Mock(return_value=root / "output" / "final.mp4")
+        result = asyncio.run(
+            run_content_workflow(
+                settings=settings,
+                agents=bundle,
+                agent_runner=fake_agent_runner,
+                video_generator=video_generator,
+            )
+        )
+
+        video_generator.assert_called_once()
+        self.assertEqual(result.video_path, video_generator.return_value)
+
+    def test_revise_decision_stops_before_video_generation(self) -> None:
+        result, video_generator = self.run_workflow("revise")
+        video_generator.assert_not_called()
+        self.assertIsNone(result.video_path)
+        self.assertEqual(result.review.decision, "revise")
+
+    def test_wrong_scene_count_is_revised_before_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            responses = [
+                current_topic_opportunity(),
+                "RESEARCH: Verified source-backed facts",
+                Screenplay.model_validate(screenplay_payload(scene_count=6)),
+                Screenplay.model_validate(screenplay_payload(scene_count=5)),
+                ScreenplayReview.model_validate(approved_review()),
+            ]
+            prompts = []
+
+            async def fake_agent_runner(agent, prompt):
+                prompts.append(prompt)
+                return responses.pop(0)
+
+            video_generator = Mock()
+            result = asyncio.run(
+                run_content_workflow(
+                    settings=settings,
+                    agents=bundle,
+                    agent_runner=fake_agent_runner,
+                    video_generator=video_generator,
+                )
+            )
+            video_generator.assert_called_once()
+            revised_screenplay = Screenplay.model_validate_json(result.screenplay_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(revised_screenplay.scenes), 5)
+            self.assertIn("4-5 scenes/images", prompts[3])
+            self.assertTrue((result.run_directory / "screenplay-attempt-01.json").is_file())
+            self.assertTrue((result.run_directory / "screenplay-attempt-02.json").is_file())
+
+    def test_narration_above_preference_is_allowed_if_reviewer_approves(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            too_long = screenplay_payload(scene_count=5, words_per_scene=10)
+            responses = [
+                current_topic_opportunity(),
+                "RESEARCH: Verified source-backed facts",
+                Screenplay.model_validate(too_long),
+                ScreenplayReview.model_validate(approved_review()),
+            ]
+            prompts = []
+
+            async def fake_agent_runner(agent, prompt):
+                prompts.append(prompt)
+                return responses.pop(0)
+
+            video_generator = Mock()
+            result = asyncio.run(
+                run_content_workflow(
+                    settings=settings,
+                    agents=bundle,
+                    agent_runner=fake_agent_runner,
+                    video_generator=video_generator,
+                )
+            )
+            video_generator.assert_called_once()
+            self.assertEqual(len(prompts), 4)
+            revised_screenplay = Screenplay.model_validate_json(result.screenplay_path.read_text(encoding="utf-8"))
+            self.assertGreater(sum(len(scene.voiceover.split()) for scene in revised_screenplay.scenes), 48)
+
+    def test_invalid_scene_count_after_retries_stops(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            invalid_scene_count = Screenplay.model_validate(screenplay_payload(scene_count=6))
+            responses = [
+                current_topic_opportunity(),
+                "RESEARCH: Verified source-backed facts",
+                invalid_scene_count,
+                invalid_scene_count,
+                invalid_scene_count,
+            ]
+
+            async def fake_agent_runner(agent, prompt):
+                return responses.pop(0)
+
+            video_generator = Mock()
+            with self.assertRaisesRegex(ValueError, "after 2 revision attempts.*Must have 4-5 scenes/images"):
+                asyncio.run(
+                    run_content_workflow(
+                        settings=settings,
+                        agents=bundle,
+                        agent_runner=fake_agent_runner,
+                        video_generator=video_generator,
+                    )
+                )
+            video_generator.assert_not_called()
+            video_generator.assert_not_called()
+
+    def test_trend_validator_requires_recent_dated_urls(self) -> None:
+        today = datetime.now().astimezone().date()
+        _validate_trend_evidence(
+            "TREND EVIDENCE:\n- " + today.isoformat() + " — current report\n"
+            "SOURCES:\n- https://example.com/new\n",
+            today=today,
+        )
+        stale_date = (today - timedelta(days=30)).isoformat()
+        with self.assertRaisesRegex(ValueError, "stale or future-dated"):
+            _validate_trend_evidence(
+                f"TREND EVIDENCE:\n- Old report dated {stale_date}.\nSOURCES:\n- https://example.com/old\n",
+                today=today,
+            )
+        with self.assertRaisesRegex(ValueError, "dated source URLs"):
+            _validate_trend_evidence("TOPIC: Evergreen idea with no trend proof", today=today)
+
+    def test_trend_validator_accepts_dated_bullets_with_urls_in_sources_section(self) -> None:
+        today = datetime.now().astimezone().date()
+        recent_date = today.isoformat()
+        opportunity = (
+            "TREND EVIDENCE:\n"
+            f"- News report published {recent_date} describes a current trend.\n\n"
+            "SOURCES:\n"
+            "- https://example.com/news-report\n"
+        )
+        _validate_trend_evidence(opportunity, today=today)
+
+    def test_trend_validator_accepts_english_date_and_url_date(self) -> None:
+        today = datetime.now().astimezone().date()
+        published = today.strftime("%B ") + str(today.day) + today.strftime(", %Y")
+        opportunity = (
+            "TREND EVIDENCE:\n"
+            f"- Report published on {published} documents a current surge.\n"
+            f"- The dated primary source is https://example.com/{today:%Y/%m/%d}/story\n\n"
+            "SOURCES:\n- https://example.com/source\n"
+        )
+        _validate_trend_evidence(opportunity, today=today)
+
+    def test_trend_validator_rejects_vague_date_with_actionable_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "explicit publication/event date"):
+            _validate_trend_evidence(
+                "TREND EVIDENCE:\n- The topic resurfaced in late 2026.\n"
+                "SOURCES:\n- https://example.com/story\n",
+                today=datetime.now().astimezone().date(),
+            )
+
+    def test_two_recent_trend_signals_allow_separate_source_urls(self) -> None:
+        today = datetime.now().astimezone().date()
+        first_date = (today - timedelta(days=9)).isoformat()
+        second_date = (today - timedelta(days=12)).isoformat()
+        opportunity = (
+            "TREND EVIDENCE:\n"
+            f"- First continuing signal dated {first_date}.\n"
+            f"- Second independent signal dated {second_date}.\n\n"
+            "SOURCES:\n- https://example.com/one\n- https://example.com/two\n"
+        )
+        _validate_trend_evidence(opportunity, today=today)
+
+    def test_approval_property_requires_threshold_and_no_factual_blockers(self) -> None:
+        review = ScreenplayReview.model_validate(approved_review())
+        self.assertTrue(review.approves_video_generation)
+        low_score = review.model_copy(update={"overall_score": 6.9})
+        critical = review.model_copy(update={"critical_failure": True})
+        unresolved_fact = review.model_copy(update={"factual_issues": ["Claim needs verification."]})
+        required_revision = review.model_copy(update={"required_changes": ["Clarify the claim."]})
+        self.assertFalse(low_score.approves_video_generation)
+        self.assertFalse(critical.approves_video_generation)
+        self.assertFalse(unresolved_fact.approves_video_generation)
+        self.assertTrue(required_revision.approves_video_generation)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,11 @@
+Bundled music library
+Downloaded: 2026-11-07
+
+| Local file | Track / creator | Source | Useful moods |
+|---|---|---|---|
+| silent-descent-eugenio-mininni-mixkit.mp3 | “Silent Descent” — Eugenio Mininni | https://assets.mixkit.co/music/614/614.mp3 | mysterious, cinematic, suspense, dramatic |
+| driving-ambition-ahjay-stelino-mixkit.mp3 | “Driving Ambition” — Ahjay Stelino | https://assets.mixkit.co/music/130/130.mp3 | uplifting, inspirational, motivational, energetic |
+| serene-view-arulo-mixkit.mp3 | “Serene View” — Arulo | https://assets.mixkit.co/music/443/443.mp3 | calm, serene, peaceful, ambient |
+
+Mixkit Stock Music Free License: https://mixkit.co/license/#musicFree
+Mixkit's license page states free-license stock music may be used in commercial and non-commercial projects, including social-media video posts, advertisements, and YouTube videos. It does not permit standalone redistribution, claiming the track as your own, incorporating it into a music-only track/remix, or registering it with a rights-management service. The license includes additional terms and limits; review the linked current terms before publishing or monetizing.

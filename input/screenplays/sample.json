@@ -1,0 +1,61 @@
+{
+  "video_title": "The Mystery of the Lost City",
+  "target_duration": 26,
+  "aspect_ratio": "9:16",
+  "scenes": [
+    {
+      "scene_id": 1,
+      "duration": 5,
+      "voiceover": "A buried city reappeared after a desert storm.",
+      "image_prompt": "Photorealistic vertical documentary frame: a huge ochre sandstorm peels back from an ancient desert city, revealing carved stone rooftops in the foreground while dunes and a glowing sunset recede behind; natural airborne sand, realistic stone textures, warm gold and deep umber palette, one clear focal reveal.",
+      "motion": "slow_zoom_in",
+      "on_screen_text": "A CITY BURIED FOR CENTURIES",
+      "sound_effect": "cinematic-swoosh-heartbeat",
+      "transition": "fade"
+    },
+    {
+      "scene_id": 2,
+      "duration": 5,
+      "voiceover": "Its stone streets survived beneath the sand.",
+      "image_prompt": "Photorealistic oblique aerial view into the newly exposed ancient city: a narrow stone street leads from the foreground toward shadowed rooftops, windblown sand spilling over doorways, weathered masonry and realistic erosion, dramatic amber sunlight, consistent warm documentary color grade, clear leading lines for a slow camera pan.",
+      "motion": "pan_right",
+      "on_screen_text": "THE STORM REVEALED IT",
+      "sound_effect": "fast-rocket-whoosh",
+      "transition": "dissolve"
+    },
+    {
+      "scene_id": 3,
+      "duration": 5,
+      "voiceover": "They found painted rooms and everyday objects.",
+      "image_prompt": "Photorealistic archaeological excavation inside an ancient room: tools frame a faded painted wall, a clay cup and household objects rest sharply in the foreground, the doorway opens to sunlit ruins beyond; natural material textures, dusty reds and sand golds, balanced layers with details for a gentle camera zoom.",
+      "motion": "subtle_zoom",
+      "on_screen_text": "STREETS UNDER THE SAND",
+      "sound_effect": "fast-sweep-transition",
+      "transition": "fade"
+    },
+    {
+      "scene_id": 4,
+      "duration": 5,
+      "voiceover": "Dry dunes shielded them from centuries of weather.",
+      "image_prompt": "Photorealistic museum-quality archaeological cutaway through desert layers: wind and rain pass across the surface while an intact pottery vessel and painted fragments sit protected in a chamber below; realistic soil strata and artifact surfaces, warm ochre against cool shadow, clear upper-to-lower composition for a slow downward camera move, no labels or lettering.",
+      "motion": "slow_zoom_out",
+      "on_screen_text": "PRESERVED BY THE DESERT",
+      "sound_effect": "cinematic-tunnel-whoosh",
+      "transition": "dissolve"
+    },
+    {
+      "scene_id": 5,
+      "duration": 6,
+      "voiceover": "An empty landscape was hiding a time capsule.",
+      "image_prompt": "Photorealistic final reveal, wide vertical desert vista at golden hour: visible dunes align with a subtle semi-transparent archaeological ground scan revealing ancient streets below, a small excavated doorway in the lower third, realistic aerial landscape detail and sweeping foreground-to-background depth, consistent cinematic documentary color grade, no words.",
+      "motion": "slow_zoom_out",
+      "on_screen_text": "A TIME CAPSULE IN THE SAND",
+      "sound_effect": "cinematic-swoosh-heartbeat",
+      "transition": "fade"
+    }
+  ],
+  "background_music": {
+    "mood": "mysterious",
+    "volume": 0.15
+  }
+}

@@ -2,9 +2,9 @@
 
 on:
   schedule:
-    # 12:17 and 18:47 IST (UTC+5:30); offset from common quarter-hour load peaks
-    - cron: "47 6 * * *"
-    - cron: "17 13 * * *"
+    # 12:13 and 18:43 IST (UTC+5:30); offset from common quarter-hour load peaks
+    - cron: "43 6 * * *"
+    - cron: "13 13 * * *"
   workflow_dispatch:
     inputs:
       privacy:

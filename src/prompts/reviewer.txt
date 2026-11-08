@@ -76,6 +76,14 @@ Look for:
 
 Identify sections where viewer attention is likely to drop.
 
+Also check that:
+
+* The opening line and first visual are specific, immediate, and supported by the research.
+* Each scene adds a distinct beat rather than repeating or padding information.
+* Curiosity is sustained through meaningful reveals or consequences, not empty cliffhangers.
+* The hook's promise is clearly resolved by the ending.
+* The narration uses concrete, concise language instead of generic hype or copied viral formulas.
+
 ---
 
 # 4. Visual Potential — 15%

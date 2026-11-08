@@ -65,7 +65,7 @@ Automated publishing remains a later, separate phase. For photorealistic images,
 
 ## Deploying on GitHub Actions
 
-`.github/workflows/shorts.yml` runs the pipeline at 12:15 and 18:45 IST and can also be started manually from the Actions tab.
+`.github/workflows/shorts.yml` schedules runs at 12:17 and 18:47 IST (`47 6 * * *` and `17 13 * * *` UTC) and can also be started manually from the Actions tab. GitHub may delay scheduled runs during Actions load; confirm the workflow is on the default branch and Actions are enabled. If a scheduled run is missing, use **Actions → Generate and upload Short → Run workflow**.
 
 Add these secrets to the `Dev` environment (Settings -> Environments -> Dev -> Environment secrets),
 or as repository secrets (Settings -> Secrets and variables -> Actions):

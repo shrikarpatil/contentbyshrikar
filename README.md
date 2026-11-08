@@ -67,7 +67,8 @@ Automated publishing remains a later, separate phase. For photorealistic images,
 
 `.github/workflows/shorts.yml` runs the pipeline at 12:15 and 18:45 IST and can also be started manually from the Actions tab.
 
-Add these repository secrets (Settings -> Secrets and variables -> Actions):
+Add these secrets to the `Dev` environment (Settings -> Environments -> Dev -> Environment secrets),
+or as repository secrets (Settings -> Secrets and variables -> Actions):
 
 - `OPENAI_API_KEY`
 - `YOUTUBE_TOKEN_JSON`: the full contents of `credentials/youtube_token.json` created by `uv run python main.py --youtube-auth`

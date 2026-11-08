@@ -27,6 +27,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
+    environment: Dev
     timeout-minutes: 45
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

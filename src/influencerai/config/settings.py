@@ -43,6 +43,9 @@ class Settings:
     image_quality: str
     image_size: str
     image_cost_per_image_usd: float | None
+    instagram_access_token: str | None
+    instagram_user_id: str | None
+    instagram_graph_api_version: str
     tts_provider: str
     tts_model: str | None
     tts_voice: str
@@ -87,6 +90,9 @@ class Settings:
             image_quality=os.getenv("IMAGE_QUALITY", "medium"),
             image_size=os.getenv("IMAGE_SIZE", "1024x1536"),
             image_cost_per_image_usd=_optional_float("IMAGE_COST_PER_IMAGE_USD"),
+            instagram_access_token=os.getenv("INSTAGRAM_ACCESS_TOKEN") or None,
+            instagram_user_id=os.getenv("INSTAGRAM_USER_ID") or None,
+            instagram_graph_api_version=os.getenv("INSTAGRAM_GRAPH_API_VERSION", "v27.0"),
             tts_provider=tts_provider,
             tts_model=os.getenv("TTS_MODEL") or None,
             tts_voice=os.getenv("TTS_VOICE", default_tts_voice),

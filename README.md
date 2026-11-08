@@ -54,14 +54,38 @@ Run the unit tests:
 uv run python -m unittest discover -s tests -v
 ```
 
-## Planned implementation order
+## Instagram Reels publishing
 
-1. Foundation, providers, and screenplay validation (implemented).
-2. FFmpeg scene animation, speech, captions, and MP4 assembly (implemented).
-3. Resume from completed stages and richer image-cost estimates.
-4. Optional higher-quality image and transcription providers.
+Instagram publishing is opt-in. The integration uploads the generated MP4 directly through Meta's resumable Reels API; it does not require public video hosting. YouTube publishing remains separate and unchanged.
 
-Automated publishing remains a later, separate phase. For photorealistic images, select the OpenAI image provider; the offline local provider remains a stylized illustration fallback. OpenAI image generation may incur charges depending on model and settings; set `IMAGE_COST_PER_IMAGE_USD` to record an estimate in the run manifest.
+The hashtag researcher creates separate YouTube and Instagram lists from current web results. Instagram tags are saved as `instagram-hashtags.txt` and take priority in the Reel caption; older runs fall back to `hashtags.txt`.
+
+Before publishing:
+
+1. Use an Instagram **Professional** account (Business or Creator) connected to a Facebook Page.
+2. Create/configure a Meta developer app with the Instagram Graph API and Facebook Login. Enable the permissions required to read the professional account and publish media, including `instagram_basic`, `instagram_content_publish`, and `pages_read_engagement`. Permission access and review requirements depend on the app and who will use it; accounts outside the app's roles generally require Advanced Access and App Review.
+3. Generate an access token with the required permissions and obtain the numeric Instagram Professional Account ID for the linked Page. Keep the token private and do not paste it into source control or chat.
+
+For local use, add these values to `.env`:
+
+```dotenv
+INSTAGRAM_ACCESS_TOKEN=your-token
+INSTAGRAM_USER_ID=your-numeric-account-id
+INSTAGRAM_GRAPH_API_VERSION=v27.0
+```
+
+Publish the approved video from a normal workflow run with `--instagram-upload`. To publish an existing MP4 without generating new content, use `--instagram-upload-video`; its directory must also contain the matching `screenplay.json` (and optionally `instagram-hashtags.txt` or `hashtags.txt`):
+
+```powershell
+uv run python main.py --instagram-upload
+uv run python main.py --instagram-upload-video output/path/to/final.mp4
+```
+
+To publish a generated video to both platforms, use `--upload --instagram-upload`. To publish an existing video to both, pass the same MP4 to `--upload-video` and `--instagram-upload-video`. When both targets are selected, the uploads run concurrently. Instagram results are saved beside the MP4 as `instagram-media-id.txt` and, when available, `instagram-url.txt`.
+
+For GitHub Actions, add `INSTAGRAM_ACCESS_TOKEN` and `INSTAGRAM_USER_ID` as secrets in the `Dev` environment. A manual workflow run can publish by checking **Publish to Instagram Reels**. Scheduled runs do not publish to Instagram unless you explicitly add the Actions repository variable `INSTAGRAM_UPLOAD_ENABLED` with value `true`; optionally set `INSTAGRAM_GRAPH_API_VERSION` as a variable to override `v27.0`. Test with a manual run before enabling scheduled publishing.
+
+For photorealistic images, select the OpenAI image provider; the offline local provider remains a stylized illustration fallback. OpenAI image generation may incur charges depending on model and settings; set `IMAGE_COST_PER_IMAGE_USD` to record an estimate in the run manifest.
 
 ## Deploying on GitHub Actions
 
@@ -72,5 +96,6 @@ or as repository secrets (Settings -> Secrets and variables -> Actions):
 
 - `OPENAI_API_KEY`
 - `YOUTUBE_TOKEN_JSON`: the full contents of `credentials/youtube_token.json` created by `uv run python main.py --youtube-auth`
+- `INSTAGRAM_ACCESS_TOKEN` and `INSTAGRAM_USER_ID` (only needed when publishing Reels)
 
 Keep the Google OAuth app in **Production** so the refresh token does not expire after 7 days. Topic history is kept between runs with the Actions cache; run artifacts (JSON/text only) are kept for 7 days.

@@ -80,6 +80,30 @@ However, never artificially withhold information in a way that makes the story c
 
 ---
 
+## Practical Engagement Blueprint
+
+Before drafting, identify the truthful promise of the video, the one question or tension that can carry it, and the payoff that resolves it. Build the scenes around that single through-line rather than stacking unrelated facts.
+
+Use this flexible progression when it fits the story:
+
+1. **Open:** Lead with the most concrete, surprising, or consequential verified detail. Pair it with a visual that makes the viewer stop and look.
+2. **Orient:** Give only the context needed to understand what is at stake and what the viewer is about to learn.
+3. **Develop:** Make each scene add a distinct piece of evidence, consequence, obstacle, contrast, or reframe. Let the stakes or understanding rise naturally.
+4. **Pay off:** Answer the opening question or fulfill its promise, then land on the clearest consequence or meaning.
+
+Craft each beat deliberately:
+
+* Prefer specific nouns, active verbs, concrete numbers, vivid contrasts, and short speakable sentences over vague hype.
+* Use a curiosity loop only when the research supports a real answer, and resolve it before the video ends.
+* Create a meaningful information or visual shift every few seconds; do not add arbitrary cliffhangers, sound effects, or cuts just to manufacture excitement.
+* Remove throat-clearing, repeated facts, filler transitions, and explanations the visuals already make clear.
+* Keep one main idea per scene. Explain necessary jargon in plain language without interrupting the story.
+* Make the last line feel earned. A CTA is optional and must not weaken the payoff.
+
+Never use false urgency, fabricated stakes, unsupported superlatives, or a hook that promises more than the story delivers. Do not copy generic viral templates mechanically; choose the structure that best fits the verified story.
+
+---
+
 # 3. Tell a Story, Don't Read a Wikipedia Page
 
 Avoid:

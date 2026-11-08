@@ -9,6 +9,8 @@ import json
 import logging
 import os
 import re
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -30,6 +32,55 @@ from influencerai.schemas.screenplay import Screenplay
 
 LOGGER = logging.getLogger("influencerai.content_workflow")
 PROMPTS_DIR = PROJECT_ROOT / "src" / "prompts"
+
+
+def _publish_to_targets(
+    video_path: Path,
+    screenplay_path: Path,
+    *,
+    youtube_upload: Callable[[Path, Path], None] | None = None,
+    instagram_upload: Callable[[Path, Path], None] | None = None,
+) -> None:
+    uploads = [
+        (name, callback)
+        for name, callback in (
+            ("YouTube", youtube_upload),
+            ("Instagram", instagram_upload),
+        )
+        if callback is not None
+    ]
+    if len(uploads) < 2:
+        for _, callback in uploads:
+            callback(video_path, screenplay_path)
+        return
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="social-upload") as executor:
+        futures = [
+            (name, executor.submit(callback, video_path, screenplay_path))
+            for name, callback in uploads
+        ]
+        failures: list[tuple[str, Exception]] = []
+        for name, future in futures:
+            try:
+                future.result()
+            except Exception as exc:
+                failures.append((name, exc))
+
+    if failures:
+        details = "; ".join(f"{name}: {error}" for name, error in failures)
+        raise RuntimeError(f"One or more social uploads failed: {details}") from failures[0][1]
+
+
+def _copy_social_metadata(screenplay_path: Path, video_path: Path) -> None:
+    source_directory = screenplay_path.parent
+    video_directory = video_path.parent
+    if source_directory.resolve() == video_directory.resolve():
+        return
+    for filename in ("hashtags.txt", "instagram-hashtags.txt"):
+        source = source_directory / filename
+        destination = video_directory / filename
+        if source.is_file() and not destination.exists():
+            shutil.copyfile(source, destination)
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,10 +457,12 @@ def create_agent_bundle(settings: Settings) -> AgentBundle:
         hashtag_researcher=Agent(
             name="Hashtag Researcher",
             instructions=(
-                "You find currently trending YouTube Shorts hashtags. Use web search to see which hashtags are being used "
-                "right now for the given topic, especially by Indian creators and audiences. Return ONLY 5 to 7 hashtags "
-                "on one line separated by spaces, each starting with #. Include at least one India-relevant tag. "
-                "Exclude #Shorts, #fyp and #viral. Never invent obscure or unrelated tags."
+                "Research currently relevant hashtags for both YouTube Shorts and Instagram Reels using web search. "
+                "Return exactly two labeled lines: YOUTUBE HASHTAGS: followed by 5 to 7 tags, then INSTAGRAM HASHTAGS: "
+                "followed by exactly 5 tags. Make each platform's list distinct and specific to the topic, using tags "
+                "actually seen in current search results or commonly used by the relevant audience. Include an India-relevant "
+                "tag when it fits. Exclude #Shorts from both lists and exclude generic spam tags such as #fyp, #viral, "
+                "and #explorepage. Never invent obscure or unrelated tags."
             ),
             tools=[WebSearchTool()],
             model=settings.openai_model,
@@ -532,20 +585,33 @@ async def run_content_workflow(
     _write_text(run_directory / "topic-researcher-output.md", research)
 
     hashtags: list[str] = []
+    instagram_hashtags: list[str] = []
     if agent_bundle.hashtag_researcher is not None:
         try:
             tag_output = await _invoke_with_retries(
                 invoke,
                 agent_bundle.hashtag_researcher,
-                f"Today is {current_date}. Find the currently trending YouTube Shorts hashtags for this topic. "
+                f"Today is {current_date}. Find currently relevant, platform-specific hashtags for YouTube Shorts and "
+                "Instagram Reels. Return the two requested labeled lines, using current web search results. "
                 f"{AUDIENCE_CONTEXT}\n\nTOPIC:\n{_topic_title(topic)}\n\nGENRE: {_topic_genre(topic)}",
             )
-            hashtags = extract_hashtags(f"HASHTAGS:\n{tag_output}") if isinstance(tag_output, str) else []
+            if isinstance(tag_output, str):
+                hashtags = extract_hashtags(tag_output, section="YOUTUBE HASHTAGS")
+                instagram_hashtags = extract_hashtags(
+                    tag_output,
+                    limit=5,
+                    section="INSTAGRAM HASHTAGS",
+                )
+                if not hashtags:
+                    hashtags = extract_hashtags(f"HASHTAGS:\n{tag_output}")
         except Exception as exc:
             LOGGER.warning("Hashtag research failed (%s); using topic-agent hashtags.", type(exc).__name__)
     hashtags = hashtags or extract_hashtags(topic)
+    instagram_hashtags = instagram_hashtags or extract_hashtags(topic, limit=5)
     if hashtags:
         _write_text(run_directory / "hashtags.txt", " ".join(hashtags))
+    if instagram_hashtags:
+        _write_text(run_directory / "instagram-hashtags.txt", " ".join(instagram_hashtags))
 
     writer_prompt = (
         "Write a production-ready, factually grounded, short-form vertical screenplay with 4 or 5 richly described photorealistic images. "
@@ -678,13 +744,17 @@ async def run_content_workflow(
         output_directory=settings.output_directory,
         settings=settings,
     )
+    _copy_social_metadata(screenplay_path, video_path)
     _write_text(run_directory / "video-output.txt", str(video_path.resolve()))
     return ContentWorkflowResult(run_directory, screenplay_path, review, video_path)
 
 
-def extract_hashtags(topic: str, limit: int = 6) -> list[str]:
-    """Pull the HASHTAGS section from the topic output."""
-    match = re.search(r"(?ims)^\s*HASHTAGS\s*:\s*(.*?)(?=^\s*[A-Z ]+:\s*$|\Z)", topic)
+def extract_hashtags(topic: str, limit: int = 6, *, section: str = "HASHTAGS") -> list[str]:
+    """Pull a labeled hashtag section from agent output."""
+    match = re.search(
+        rf"(?ims)^\s*{re.escape(section)}\s*:\s*(.*?)(?=^\s*[A-Z ]+:\s*|\Z)",
+        topic,
+    )
     if not match:
         return []
     seen: list[str] = []
@@ -703,6 +773,11 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, help="Override OUTPUT_DIRECTORY.")
     parser.add_argument("--upload", action="store_true", help="Upload the approved video to YouTube.")
     parser.add_argument(
+        "--instagram-upload",
+        action="store_true",
+        help="Publish the generated video as an Instagram Reel (requires Meta Graph API credentials).",
+    )
+    parser.add_argument(
         "--youtube-privacy",
         choices=("private", "unlisted", "public"),
         default=None,
@@ -710,6 +785,11 @@ def main() -> int:
     )
     parser.add_argument("--youtube-auth", action="store_true", help="Run the one-time YouTube login and exit.")
     parser.add_argument("--upload-video", type=Path, help="Upload an existing final.mp4 (uses screenplay.json beside it).")
+    parser.add_argument(
+        "--instagram-upload-video",
+        type=Path,
+        help="Publish an existing MP4 as an Instagram Reel (uses screenplay.json beside it).",
+    )
     parser.add_argument(
         "--image-provider",
         choices=("local", "openai"),
@@ -752,6 +832,11 @@ def main() -> int:
                 tts_voice=args.tts_voice or settings.tts_voice,
             )
 
+        if args.instagram_upload or args.instagram_upload_video:
+            from influencerai.services.instagram_service import validate_instagram_settings
+
+            validate_instagram_settings(settings)
+
         import os
 
         from influencerai.services import youtube_service as yt
@@ -771,20 +856,45 @@ def main() -> int:
             _write_text(video.parent / "youtube-url.txt", url)
             print(f"Uploaded to YouTube ({yt_settings.privacy_status}): {url}")
 
+        def instagram_upload(video: Path, screenplay: Path) -> None:
+            from influencerai.services.instagram_service import publish_reel
+
+            result = publish_reel(video, screenplay, settings)
+            _write_text(video.parent / "instagram-media-id.txt", result.media_id)
+            if result.permalink:
+                _write_text(video.parent / "instagram-url.txt", result.permalink)
+                print(f"Published Instagram Reel: {result.permalink}")
+            else:
+                print(f"Published Instagram Reel (media ID: {result.media_id})")
+
         if args.youtube_auth:
             yt.get_credentials(yt_settings)
             print(f"YouTube login saved to {yt_settings.token_path}")
             return 0
-        if args.upload_video:
-            upload(args.upload_video, args.upload_video.parent / "screenplay.json")
+        if args.upload_video or args.instagram_upload_video:
+            if args.upload_video and args.instagram_upload_video and args.upload_video.resolve() != args.instagram_upload_video.resolve():
+                raise ValueError("YouTube and Instagram existing-video options must point to the same MP4 when used together.")
+            existing_video = args.upload_video or args.instagram_upload_video
+            existing_screenplay = existing_video.parent / "screenplay.json"
+            _publish_to_targets(
+                existing_video,
+                existing_screenplay,
+                youtube_upload=upload if args.upload_video else None,
+                instagram_upload=instagram_upload if args.instagram_upload or args.instagram_upload_video else None,
+            )
             return 0
 
         if args.sample or args.screenplay:
             screenplay_path = args.screenplay or PROJECT_ROOT / "input" / "screenplays" / "sample.json"
             video_path = run_pipeline(screenplay_path, settings=settings)
+            _copy_social_metadata(screenplay_path, video_path)
             print(f"Video created: {video_path}")
-            if args.upload:
-                upload(video_path, screenplay_path)
+            _publish_to_targets(
+                video_path,
+                screenplay_path,
+                youtube_upload=upload if args.upload else None,
+                instagram_upload=instagram_upload if args.instagram_upload else None,
+            )
             return 0
 
         result = asyncio.run(run_content_workflow(settings=settings))
@@ -796,8 +906,12 @@ def main() -> int:
             return 0
         print(f"Approved video created: {result.video_path}")
         print(f"Agent artifacts: {result.run_directory}")
-        if args.upload:
-            upload(result.video_path, result.screenplay_path)
+        _publish_to_targets(
+            result.video_path,
+            result.screenplay_path,
+            youtube_upload=upload if args.upload else None,
+            instagram_upload=instagram_upload if args.instagram_upload else None,
+        )
         return 0
     except Exception as exc:
         LOGGER.exception("Content workflow failed (%s).", type(exc).__name__)

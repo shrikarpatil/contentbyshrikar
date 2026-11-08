@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import threading
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -14,9 +15,12 @@ from unittest.mock import Mock
 from influencerai.config.settings import Settings
 from influencerai.pipeline.content_workflow import (
     AgentBundle,
+    _copy_social_metadata,
     _invoke_with_retries,
+    _publish_to_targets,
     _is_repeated_topic,
     _load_topic_history,
+    extract_hashtags,
     _save_topic_history,
     _topic_genre,
     _topic_title,
@@ -82,6 +86,61 @@ def current_topic_opportunity(title: str = "A verified current story opportunity
 
 
 class ContentWorkflowTests(unittest.TestCase):
+    def test_social_hashtag_files_are_copied_beside_rendered_video(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            screenplay_directory = root / "content-run"
+            video_directory = root / "video-run"
+            screenplay_directory.mkdir()
+            video_directory.mkdir()
+            (screenplay_directory / "hashtags.txt").write_text("#YouTubeTopic", encoding="utf-8")
+            (screenplay_directory / "instagram-hashtags.txt").write_text("#InstagramTopic", encoding="utf-8")
+            (video_directory / "hashtags.txt").write_text("#KeepExisting", encoding="utf-8")
+
+            _copy_social_metadata(
+                screenplay_directory / "screenplay.json",
+                video_directory / "final.mp4",
+            )
+
+            self.assertEqual((video_directory / "hashtags.txt").read_text(encoding="utf-8"), "#KeepExisting")
+            self.assertEqual(
+                (video_directory / "instagram-hashtags.txt").read_text(encoding="utf-8"),
+                "#InstagramTopic",
+            )
+
+    def test_extract_hashtags_reads_platform_specific_sections(self) -> None:
+        output = (
+            "YOUTUBE HASHTAGS: #SpaceShorts #India\n"
+            "INSTAGRAM HASHTAGS: #Astrophysics #SpacePhotography #IndiaScience #Cosmos #Astronomy"
+        )
+
+        self.assertEqual(extract_hashtags(output, section="YOUTUBE HASHTAGS"), ["#SpaceShorts", "#India"])
+        self.assertEqual(
+            extract_hashtags(output, limit=5, section="INSTAGRAM HASHTAGS"),
+            ["#Astrophysics", "#SpacePhotography", "#IndiaScience", "#Cosmos", "#Astronomy"],
+        )
+
+    def test_dual_platform_uploads_run_concurrently(self) -> None:
+        upload_barrier = threading.Barrier(2)
+        completed: list[str] = []
+
+        def youtube_upload(_video_path: Path, _screenplay_path: Path) -> None:
+            upload_barrier.wait(timeout=2)
+            completed.append("youtube")
+
+        def instagram_upload(_video_path: Path, _screenplay_path: Path) -> None:
+            upload_barrier.wait(timeout=2)
+            completed.append("instagram")
+
+        _publish_to_targets(
+            Path("final.mp4"),
+            Path("screenplay.json"),
+            youtube_upload=youtube_upload,
+            instagram_upload=instagram_upload,
+        )
+
+        self.assertCountEqual(completed, ["youtube", "instagram"])
+
     def run_workflow(self, decision: str):
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
@@ -399,7 +458,7 @@ class ContentWorkflowTests(unittest.TestCase):
                 prompts.append(prompt)
                 return responses.pop(0)
 
-            video_generator = Mock()
+            video_generator = Mock(return_value=root / "output" / "final.mp4")
             result = asyncio.run(
                 run_content_workflow(
                     settings=settings,
@@ -433,7 +492,7 @@ class ContentWorkflowTests(unittest.TestCase):
                 prompts.append(prompt)
                 return responses.pop(0)
 
-            video_generator = Mock()
+            video_generator = Mock(return_value=root / "output" / "final.mp4")
             result = asyncio.run(
                 run_content_workflow(
                     settings=settings,

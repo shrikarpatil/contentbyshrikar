@@ -19,6 +19,7 @@ from influencerai.schemas.screenplay import Screenplay
 from influencerai.services.instagram_service import (
     _http_error_detail,
     _upload_resumable,
+    prepare_reel,
     publish_reel,
     validate_instagram_settings,
 )
@@ -182,6 +183,35 @@ class InstagramServiceTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "upload URI"):
                         publish_reel(video_path, screenplay_path, settings, opener=opener)
                     self.assertEqual(opener.call_count, 1)
+
+    def test_prepare_reel_processes_without_publishing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video = root / "test.mp4"
+            video.write_bytes(b"test-video")
+            settings = replace(
+                Settings.from_env(project_root=root),
+                instagram_access_token="fake-access-token",
+                instagram_user_id="123456789012345",
+                instagram_graph_api_version="v27.0",
+            )
+            responses = [
+                {"id": "container-1", "uri": "https://rupload.facebook.com/ig-api-upload/v27.0/container-1"},
+                {"success": True},
+                {"status_code": "IN_PROGRESS"},
+                {"status_code": "FINISHED"},
+            ]
+            requests = []
+
+            def fake_opener(request, timeout):
+                requests.append(request)
+                return FakeResponse(responses.pop(0))
+
+            result = prepare_reel(video, "Diagnostic", settings, opener=fake_opener, sleep=Mock(), poll_interval=0)
+            self.assertEqual(result, "container-1")
+            self.assertEqual(len(requests), 4)
+            self.assertTrue(all("/media_publish" not in request.full_url for request in requests))
+            self.assertEqual(parse_qs(requests[0].data.decode())["caption"], ["Diagnostic"])
 
     def test_publish_reel_rejects_non_mp4_before_network(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

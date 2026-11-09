@@ -250,26 +250,24 @@ def _wait_until_ready(
     raise TimeoutError(f"Instagram Reel container {container_id} was not ready after {max_polls} checks.")
 
 
-def publish_reel(
+def prepare_reel(
     video_path: Path,
-    screenplay_path: Path,
+    caption: str,
     settings: Settings,
     *,
     opener: Callable[..., Any] = urlopen,
     sleep: Callable[[float], None] = time.sleep,
     poll_interval: float = CONTAINER_POLL_INTERVAL_SECONDS,
     max_polls: int = MAX_CONTAINER_POLLS,
-) -> InstagramPublishResult:
-    """Upload a local MP4 as an Instagram Reel and publish it."""
+) -> str:
+    """Upload and process an Instagram Reel without publishing it."""
     validate_instagram_settings(settings)
     if not video_path.is_file():
         raise FileNotFoundError(f"Instagram Reel video was not found: {video_path}")
     if video_path.suffix.lower() != ".mp4":
         raise ValueError("Instagram Reels publishing requires an MP4 video.")
 
-    screenplay = load_screenplay(screenplay_path)
     api_version = settings.instagram_graph_api_version
-    caption = build_caption(screenplay, screenplay_path)
     container = _graph_request(
         "POST",
         f"{settings.instagram_user_id}/media",
@@ -315,6 +313,36 @@ def publish_reel(
         poll_interval=poll_interval,
         max_polls=max_polls,
     )
+    return container_id
+
+
+def publish_reel(
+    video_path: Path,
+    screenplay_path: Path,
+    settings: Settings,
+    *,
+    opener: Callable[..., Any] = urlopen,
+    sleep: Callable[[float], None] = time.sleep,
+    poll_interval: float = CONTAINER_POLL_INTERVAL_SECONDS,
+    max_polls: int = MAX_CONTAINER_POLLS,
+) -> InstagramPublishResult:
+    """Upload a local MP4 as an Instagram Reel and publish it."""
+    validate_instagram_settings(settings)
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Instagram Reel video was not found: {video_path}")
+    if video_path.suffix.lower() != ".mp4":
+        raise ValueError("Instagram Reels publishing requires an MP4 video.")
+    screenplay = load_screenplay(screenplay_path)
+    container_id = prepare_reel(
+        video_path,
+        build_caption(screenplay, screenplay_path),
+        settings,
+        opener=opener,
+        sleep=sleep,
+        poll_interval=poll_interval,
+        max_polls=max_polls,
+    )
+    api_version = settings.instagram_graph_api_version
     published = _graph_request(
         "POST",
         f"{settings.instagram_user_id}/media_publish",

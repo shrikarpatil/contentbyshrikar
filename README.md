@@ -60,6 +60,8 @@ uv run python -m unittest discover -s tests -v
 
 Instagram publishing is opt-in. The integration uploads the generated MP4 directly through Meta's resumable Reels API; it does not require public video hosting. YouTube publishing remains separate and unchanged.
 
+Newly rendered MP4s use AAC audio at 48 kHz with a 112 kbps target to leave headroom below Instagram's 128 kbps specification. Existing MP4s are not converted when uploaded; re-render or re-encode older files if they exceed Instagram's audio specifications.
+
 The hashtag researcher creates separate YouTube and Instagram lists from current web results. Instagram tags are saved as `instagram-hashtags.txt` and take priority in the Reel caption; older runs fall back to `hashtags.txt`.
 
 Before publishing:

@@ -104,7 +104,7 @@ class InstagramServiceTests(unittest.TestCase):
                 instagram_graph_api_version="v27.0",
             )
             responses = [
-                {"id": "container-1"},
+                {"id": "container-1", "uri": "https://rupload.facebook.com/ig-api-upload/v26.0/container-1"},
                 {"success": True},
                 {"status_code": "IN_PROGRESS", "status": "upload complete"},
                 {"status_code": "FINISHED", "status": "ready"},
@@ -143,6 +143,7 @@ class InstagramServiceTests(unittest.TestCase):
             self.assertNotIn("#Shorts", create_fields["caption"][0])
             upload = requests[1]
             self.assertEqual(urlparse(upload.full_url).hostname, "rupload.facebook.com")
+            self.assertEqual(upload.full_url, "https://rupload.facebook.com/ig-api-upload/v26.0/container-1")
             self.assertEqual(upload.data, video_bytes)
             self.assertEqual(upload.get_header("Offset"), "0")
             self.assertEqual(upload.get_header("File_size"), str(len(video_bytes)))
@@ -151,6 +152,31 @@ class InstagramServiceTests(unittest.TestCase):
             self.assertTrue(requests[4].full_url.endswith("/123456789012345/media_publish"))
             self.assertEqual(parse_qs(requests[4].data.decode("utf-8"))["creation_id"], ["container-1"])
             sleep.assert_called_once_with(0)
+
+    def test_missing_or_untrusted_upload_uri_is_rejected_before_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_path = root / "final.mp4"
+            video_path.write_bytes(b"mock-mp4-content")
+            screenplay_path = sample_screenplay_path(root)
+            settings = replace(
+                Settings.from_env(project_root=root),
+                instagram_access_token="fake-access-token",
+                instagram_user_id="123456789012345",
+            )
+            for uri in (
+                None,
+                "http://rupload.facebook.com/ig-api-upload/v27.0/container-1",
+                "https://attacker.example/ig-api-upload/v27.0/container-1",
+                "https://rupload.facebook.com@attacker.example/ig-api-upload/v27.0/container-1",
+                "https://rupload.facebook.com/ig-api-upload/v27.0/other",
+                "https://rupload.facebook.com/ig-api-upload/v27.0/container-1?token=abc",
+            ):
+                with self.subTest(uri=uri):
+                    opener = Mock(return_value=FakeResponse({"id": "container-1", "uri": uri}))
+                    with self.assertRaisesRegex(RuntimeError, "upload URI"):
+                        publish_reel(video_path, screenplay_path, settings, opener=opener)
+                    self.assertEqual(opener.call_count, 1)
 
     def test_publish_reel_rejects_non_mp4_before_network(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -187,7 +213,7 @@ class InstagramServiceTests(unittest.TestCase):
                         {"error": {"code": 2207052, "message": "Unsupported video codec"}}
                     ).encode("utf-8")
                     raise HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(error_body))
-                return FakeResponse({"id": "container-1"})
+                return FakeResponse({"id": "container-1", "uri": "https://rupload.facebook.com/ig-api-upload/v27.0/container-1"})
 
             with self.assertRaisesRegex(RuntimeError, "code=2207052: Unsupported video codec") as caught:
                 publish_reel(video_path, screenplay_path, settings, opener=fake_opener)

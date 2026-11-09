@@ -123,7 +123,7 @@ def assemble_video(
             "-t", f"{total_duration:.3f}",
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", "-threads", "2",
             "-pix_fmt", "yuv420p", "-r", str(settings.video_fps),
-            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(final_video),
+            "-c:a", "aac", "-ar", "48000", "-b:a", "112k", "-movflags", "+faststart", str(final_video),
         ]
     )
     run_ffmpeg(executable, arguments, cwd=run_directory, stage="final video assembly")

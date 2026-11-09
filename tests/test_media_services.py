@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import tempfile
 from email.message import Message
 from types import SimpleNamespace
@@ -35,6 +36,7 @@ from influencerai.services.video_assembly_service import (
     _caption_filter,
     assemble_video,
 )
+from influencerai.utils.ffmpeg_utils import resolve_ffmpeg, run_ffmpeg
 
 
 def make_screenplay() -> Screenplay:
@@ -154,6 +156,9 @@ class MediaServiceTests(unittest.TestCase):
                 )
 
         self.assertEqual(result, final_video)
+        assembly_args = ffmpeg.call_args_list[0].args[1]
+        self.assertEqual(assembly_args[assembly_args.index("-ar") + 1], "48000")
+        self.assertEqual(assembly_args[assembly_args.index("-b:a") + 1], "112k")
         filter_complex = ffmpeg.call_args_list[0].args[1][
             ffmpeg.call_args_list[0].args[1].index("-filter_complex") + 1
         ]
@@ -163,6 +168,52 @@ class MediaServiceTests(unittest.TestCase):
         self.assertEqual(_background_music_gain(0.14), 0.14)
         self.assertEqual(_background_music_gain(0.5), MAX_BACKGROUND_MUSIC_GAIN)
         self.assertEqual(_background_music_gain(0), 0)
+
+    def test_final_video_audio_uses_reels_compatible_sample_rate(self) -> None:
+        executable = resolve_ffmpeg("ffmpeg")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video = root / "visuals.mp4"
+            narration = root / "narration.wav"
+            (root / "captions").mkdir()
+            write_ass(estimate_cues("Test caption.", 0, 3), root / "captions" / "captions.ass")
+            run_ffmpeg(
+                executable,
+                ["-y", "-f", "lavfi", "-i", "color=c=black:s=128x128:r=30:d=3",
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video)],
+                cwd=root,
+                stage="test video preparation",
+            )
+            run_ffmpeg(
+                executable,
+                ["-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=96000:duration=3",
+                 str(narration)],
+                cwd=root,
+                stage="test narration preparation",
+            )
+            settings = replace(
+                Settings.from_env(project_root=root),
+                music_directory=root / "music",
+                sound_effects_directory=root / "effects",
+                auto_download_music=False,
+            )
+            with (
+                patch("influencerai.services.video_assembly_service._concat_visuals", return_value=video),
+                patch("influencerai.services.video_assembly_service.find_or_download_music", return_value=None),
+            ):
+                result = assemble_video(
+                    executable, make_screenplay(), root, settings, [video], narration,
+                    [0, 0.6, 1.2, 1.8, 2.4], 3, logging.getLogger("test.video-audio"),
+                )
+            probe = run_ffmpeg(
+                executable, ["-i", str(result), "-f", "null", "-"],
+                cwd=root, stage="test audio inspection",
+            )
+            audio_line = next(line for line in probe.stderr.splitlines() if "Audio: aac" in line)
+            self.assertIn("48000 Hz", audio_line)
+            bitrate = re.search(r"(\d+) kb/s", audio_line)
+            self.assertIsNotNone(bitrate, audio_line)
+            self.assertLessEqual(int(bitrate.group(1)), 128)
 
     def test_audio_timeline_pads_scene_to_requested_duration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

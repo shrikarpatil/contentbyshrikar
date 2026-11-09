@@ -93,6 +93,8 @@ If the token is rejected as malformed, replace `INSTAGRAM_ACCESS_TOKEN` with the
 
 For upload troubleshooting, GitHub Actions logs sanitized request and response diagnostics. To enable the same diagnostics locally, set `INSTAGRAM_UPLOAD_DIAGNOSTICS=1` in your shell before running the upload. The logs include the video size and SHA-256 fingerprint, operating system, Python version, configured proxy presence, request metadata, HTTP status, and selected response-header indicators; they do not include the access token, proxy URLs, or video contents. Matching fingerprints confirm the same video was used. The workflow does not retain the MP4 in its artifacts. Uploading an existing video with `--instagram-upload-video` publishes it if successful.
 
+For a no-OpenAI-cost upload test, run **Actions -> Instagram upload diagnostic -> Run workflow** on a branch containing that workflow. It uses the `Dev` environment's Instagram credentials to render a synthetic six-second test pattern and tone, upload it to an Instagram container, and wait for processing; it never publishes a Reel. The generated MP4 is retained as an Actions artifact for seven days, including if upload fails, so the exact file can be compared locally. It does not test the full content-generation pipeline. GitHub Actions usage may still be billed. The workflow must exist on the default branch before it can be manually dispatched.
+
 For photorealistic images, select the OpenAI image provider; the offline local provider remains a stylized illustration fallback. OpenAI image generation may incur charges depending on model and settings; set `IMAGE_COST_PER_IMAGE_USD` to record an estimate in the run manifest.
 
 ## Deploying on GitHub Actions

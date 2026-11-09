@@ -1,0 +1,35 @@
+name: Instagram upload diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-upload:
+    runs-on: ubuntu-latest
+    environment: Dev
+    timeout-minutes: 15
+    env:
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
+      INSTAGRAM_GRAPH_API_VERSION: ${{ vars.INSTAGRAM_GRAPH_API_VERSION || 'v27.0' }}
+      INSTAGRAM_UPLOAD_DIAGNOSTICS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Generate and test unpublished Reel
+        run: uv run python -m influencerai.instagram_diagnostic
+      - name: Save diagnostic video
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-diagnostic-video
+          path: output/instagram-diagnostic/test.mp4
+          retention-days: 7
+          if-no-files-found: warn

@@ -56,6 +56,14 @@ Use web search to identify:
 
 Look across multiple relevant sources rather than relying on a single search result.
 
+Identify at least three distinct candidate stories across suitable genres when the available evidence permits.
+Compare them internally before choosing one: for each, identify its specific current development, why an
+Indian viewer would care, an understandable tension or surprise, a payoff supported by evidence, and
+whether it can be shown with 4 or 5 still images. Prefer the story with the clearest combination of
+these qualities rather than the most dramatic headline or most familiar subject. Do not invent candidates,
+interest, or evidence to reach a quota; if fewer candidates can be verified, select the strongest supported
+one. Return only the selected opportunity in the existing output format.
+
 ---
 
 ## Step 2 — Evaluate
@@ -179,7 +187,7 @@ TOPIC:
 [Specific topic]
 
 CONTENT ANGLE:
-[The specific story/argument/perspective]
+[The specific story/argument/perspective, including what makes this angle more compelling than a generic headline]
 
 WHY NOW:
 [Why this topic is relevant or interesting right now]

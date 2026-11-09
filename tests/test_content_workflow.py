@@ -211,6 +211,12 @@ class ContentWorkflowTests(unittest.TestCase):
             self.assertIn("primary audience", prompt)
             self.assertIn("India", prompt)
         self.assertIn("English by default", prompts[2])
+        self.assertIn("Compare at least three distinct potential stories", prompts[0])
+        self.assertIn("return the single best opportunity", prompts[0].lower())
+        self.assertIn("three distinct research-grounded opening lines", prompts[2])
+        self.assertIn("resolve the opening's promise", prompts[2])
+        self.assertIn("first spoken sentence and first visual", prompts[3])
+        self.assertIn("recommend revision", prompts[3])
 
     def test_agent_runner_retries_transient_failures_only(self) -> None:
         class TemporaryAgentFailure(Exception):
@@ -379,6 +385,8 @@ class ContentWorkflowTests(unittest.TestCase):
             self.assertIn("India's indigenous GPU development plan", prompts[3])
             self.assertIn("A past archaeology discovery", prompts[3])
             self.assertIn("stale or future-dated", prompts[3])
+            self.assertIn("Compare distinct supported stories", prompts[3])
+            self.assertIn("return only the strongest eligible opportunity", prompts[3])
             saved_topic = (result.run_directory / "topic-generator-output.md").read_text(encoding="utf-8")
             self.assertIn("A recent wildlife conservation discovery", saved_topic)
 

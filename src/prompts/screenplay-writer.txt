@@ -84,6 +84,13 @@ However, never artificially withhold information in a way that makes the story c
 
 Before drafting, identify the truthful promise of the video, the one question or tension that can carry it, and the payoff that resolves it. Build the scenes around that single through-line rather than stacking unrelated facts.
 
+Develop three distinct potential opening lines internally, each grounded in the research and understandable
+without prior specialist knowledge. Choose the most specific one that creates a genuine question or
+stakes and can be resolved within the script; do not output the alternatives. Pair the opening with an
+image of the specific subject rather than generic technology, cityscapes, or abstract imagery. The final
+scene must answer the opening's question or deliver its promised consequence. Do not manufacture mystery
+when the evidence supports a direct explanation instead.
+
 Use this flexible progression when it fits the story:
 
 1. **Open:** Lead with the most concrete, surprising, or consequential verified detail. Pair it with a visual that makes the viewer stop and look.

@@ -8,6 +8,8 @@ Running `main.py` with no arguments executes the integrated workflow: trending-t
 
 Topic discovery makes up to six attempts, retaining rejected candidates and their reasons in later search prompts and exploring different genre groups. If no fresh, sufficiently dated candidate is found, the workflow stops rather than publishing a repeated or unverified topic; additional searches may incur API charges.
 
+Within each discovery attempt, the topic agent compares multiple supported stories when available and selects one with a clear audience-relevant angle and evidence-backed payoff. The writer considers alternative openings internally, and the reviewer checks that the first spoken line and visual create a clear promise that the ending fulfills. These are editorial judgments, not guarantees of engagement. The automatic approval and publishing flow remains unchanged; comparing additional candidates may increase search and agent costs.
+
 The local image provider creates offline stylized artwork. For the requested photorealistic cinematic images, select OpenAI image generation (`--image-provider openai`); image API usage may incur charges. Windows SAPI is the free local narration option; for a more natural neural voice, enable OpenAI TTS with `TTS_PROVIDER=openai` and `TTS_VOICE=marin` (billable API usage). Screenplay-based caption timing works without transcription downloads; optional Faster-Whisper enables speech-derived timestamps.
 
 ## Setup

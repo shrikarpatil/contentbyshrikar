@@ -42,6 +42,10 @@ Ask:
 
 A weak hook should be considered a serious problem.
 
+Judge the actual first spoken sentence and first visual, not the title or the writer's intent. A hook is
+weak if it is generic, needs several sentences of context before the point becomes clear, or promises a
+reveal the screenplay never delivers. Identify the scene and a specific change that would improve it.
+
 ---
 
 # 2. Storytelling — 20%
@@ -83,6 +87,8 @@ Also check that:
 * Curiosity is sustained through meaningful reveals or consequences, not empty cliffhangers.
 * The hook's promise is clearly resolved by the ending.
 * The narration uses concrete, concise language instead of generic hype or copied viral formulas.
+* The final scene answers the actual opening promise, and every intervening scene advances the same story.
+* Recommendations are specific enough for a writer to act on without adding unsupported facts.
 
 ---
 
@@ -134,6 +140,8 @@ Ask:
 * Is the CTA natural if one exists?
 
 The video should not simply run out of information and stop.
+If the opening's central question remains unanswered or the payoff is unrelated, describe the gap and
+recommend revision rather than approving the screenplay on an otherwise high average alone.
 
 ---
 

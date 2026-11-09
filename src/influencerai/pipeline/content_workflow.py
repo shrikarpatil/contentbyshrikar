@@ -529,6 +529,8 @@ async def run_content_workflow(
         "Verify dates and trend signals with web search; do not present evergreen stories as trending. "
         f"Explore a broad range of appropriate genres, such as {genre_guidance}; choose a well-supported trend, "
         "prefer a different genre from recent runs when another comparably strong trend exists, and do not force a genre without evidence. "
+        "Compare at least three distinct potential stories internally when verified evidence permits, "
+        "and choose the clearest audience-relevant tension and supported payoff, not merely a popular headline. "
         "Keep topics suitable for a general audience: avoid graphic violence, sexual content, dangerous instructions, and unverified claims. "
         "Return the single best opportunity in the required format, including a one-line GENRE field.\n\n"
         f"RECENTLY USED TOPICS — do not repeat or lightly rephrase:\n{recent_topics}\n\n"
@@ -574,6 +576,8 @@ async def run_content_workflow(
                 f"For this search explore {discovery_focuses[attempt]}, but select another appropriate genre "
                 "if it has stronger verified evidence. Do not reuse any rejected or previously used story, "
                 "even with a different headline. Search multiple independent recent sources. "
+                "Compare distinct supported stories for an audience-relevant tension and a payoff; "
+                "return only the strongest eligible opportunity. "
                 "In TREND EVIDENCE, include an explicit publication/event date in ISO YYYY-MM-DD or Month D, YYYY format "
                 "on each supporting signal line, and put the corresponding source URLs in SOURCES. Avoid vague dates. "
                 f"Recent signals must be dated from {(today - timedelta(days=7)).isoformat()} to {current_date}; "
@@ -638,6 +642,8 @@ async def run_content_workflow(
         f"{AUDIENCE_CONTEXT} "
         f"Aim for a runtime under 30 seconds (about {PREFERRED_VIDEO_DURATION_SECONDS} seconds) and around "
         f"{PREFERRED_NARRATION_WORDS} spoken words, but do not sacrifice clarity, natural narration, or story completeness to meet those targets. "
+        "Consider three distinct research-grounded opening lines internally and choose the clearest specific hook. "
+        "Pair it with a relevant first visual, build each scene around a distinct beat, and resolve the opening's promise by the ending. "
         "Longer videos are acceptable when the material needs them. Return only the structured screenplay.\n\n"
         f"CONTENT OPPORTUNITY:\n{topic}\n\nRESEARCH PACKAGE:\n{research}"
     )
@@ -713,7 +719,10 @@ async def run_content_workflow(
     screenplay_path.write_text(screenplay.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     review_prompt = (
-        "Review this screenplay strictly against the opportunity and research. Return only the structured review.\n\n"
+        "Review this screenplay strictly against the opportunity and research. Evaluate the first spoken sentence and first visual, "
+        "identify any scene that stalls the story, and verify that the ending delivers the opening's promise. "
+        "If the hook's core promise remains unresolved, recommend revision with a specific actionable change. "
+        "Return only the structured review.\n\n"
         f"{AUDIENCE_CONTEXT}\n\n"
         f"CONTENT OPPORTUNITY:\n{topic}\n\nRESEARCH PACKAGE:\n{research}\n\n"
         f"SCREENPLAY JSON:\n{screenplay.model_dump_json(indent=2)}"

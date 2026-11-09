@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
+import platform
 import re
 import time
 from dataclasses import dataclass
@@ -11,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, getproxies, urlopen
 
 from influencerai.config.settings import Settings
 from influencerai.schemas.screenplay import Screenplay, load_screenplay
@@ -157,9 +160,10 @@ def _upload_resumable(
     video_size = video_path.stat().st_size
     if video_size <= 0 or video_size > MAX_VIDEO_UPLOAD_BYTES:
         raise ValueError(f"Instagram Reel MP4 must be between 1 byte and {MAX_VIDEO_UPLOAD_BYTES} bytes.")
+    video_bytes = video_path.read_bytes()
     request = Request(
         upload_uri,
-        data=video_path.read_bytes(),
+        data=video_bytes,
         headers={
             "Authorization": f"OAuth {access_token}",
             "offset": "0",
@@ -168,16 +172,52 @@ def _upload_resumable(
         },
         method="POST",
     )
+    diagnostics = os.environ.get("INSTAGRAM_UPLOAD_DIAGNOSTICS") == "1"
+    if diagnostics:
+        proxies = getproxies()
+        LOGGER.warning(
+            "Instagram upload diagnostics: environment=%s os=%s python=%s method=POST "
+            "host=rupload.facebook.com api_version=%s bytes=%d sha256=%s "
+            "content_type=application/octet-stream offset=0 authorization=OAuth "
+            "http_proxy_configured=%s https_proxy_configured=%s",
+            "github-actions" if os.environ.get("GITHUB_ACTIONS") == "true" else "other",
+            platform.system(),
+            platform.python_version(),
+            urlsplit(upload_uri).path.split("/")[2],
+            len(video_bytes),
+            hashlib.sha256(video_bytes).hexdigest(),
+            bool(proxies.get("http")),
+            bool(proxies.get("https")),
+        )
     try:
         with opener(request, timeout=300) as response:
+            if diagnostics:
+                _log_upload_response(getattr(response, "status", None), getattr(response, "headers", None))
             payload = _response_json(response)
     except HTTPError as exc:
+        if diagnostics:
+            _log_upload_response(exc.code, exc.headers)
         detail = _http_error_detail(exc, access_token)
         raise RuntimeError(f"Instagram Reel upload failed (HTTP {exc.code}; {detail}).") from exc
     except (URLError, TimeoutError, OSError) as exc:
+        if diagnostics:
+            LOGGER.warning("Instagram upload diagnostics: transport_error=%s", type(exc).__name__)
         raise RuntimeError(f"Instagram Reel upload failed ({type(exc).__name__}).") from exc
     if payload.get("success") is False:
         raise RuntimeError("Instagram Reel upload was rejected by Meta.")
+
+
+def _log_upload_response(status: int | None, headers: Any) -> None:
+    proxy_status = headers.get("Proxy-Status", "") if headers else ""
+    LOGGER.warning(
+        "Instagram upload diagnostics: response_status=%s proxy_status_present=%s "
+        "proxy_http_request_error=%s fb_request_id_present=%s fb_trace_id_present=%s",
+        status,
+        bool(proxy_status),
+        "http_request_error" in proxy_status.lower(),
+        bool(headers and headers.get("x-fb-request-id")),
+        bool(headers and headers.get("x-fb-trace-id")),
+    )
 
 
 def _wait_until_ready(

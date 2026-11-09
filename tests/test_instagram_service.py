@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import json
+import hashlib
 import io
+import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from influencerai.config.settings import Settings
 from influencerai.schemas.screenplay import Screenplay
 from influencerai.services.instagram_service import (
     _http_error_detail,
+    _upload_resumable,
     publish_reel,
     validate_instagram_settings,
 )
@@ -24,6 +27,8 @@ from influencerai.services.instagram_service import (
 class FakeResponse:
     def __init__(self, payload: dict[str, object]) -> None:
         self._payload = payload
+        self.status = 200
+        self.headers: dict[str, str] = {}
 
     def __enter__(self):
         return self
@@ -238,6 +243,81 @@ class InstagramServiceTests(unittest.TestCase):
         self.assertIn("[redacted]", detail)
         self.assertIn("x-fb-request-id=request-123", detail)
         self.assertNotIn("fake-access-token", detail)
+
+    def test_upload_diagnostics_report_safe_request_and_response_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "final.mp4"
+            video_bytes = b"private-video-content"
+            video.write_bytes(video_bytes)
+            error = HTTPError(
+                "https://rupload.facebook.com/ig-api-upload/v27.0/container-1",
+                400,
+                "Bad Request",
+                {"Proxy-Status": "http_request_error; secret=fake-access-token",
+                 "x-fb-request-id": "request-123"},
+                io.BytesIO(b'{"debug_info":{"message":"Request processing failed"}}'),
+            )
+            with (
+                patch.dict(os.environ, {"INSTAGRAM_UPLOAD_DIAGNOSTICS": "1", "GITHUB_ACTIONS": "true"}),
+                patch("influencerai.services.instagram_service.getproxies",
+                      return_value={"https": "http://secret-proxy.example"}),
+                self.assertLogs("influencerai.instagram", level="WARNING") as logs,
+                self.assertRaises(RuntimeError),
+            ):
+                _upload_resumable(
+                    error.url, video, access_token="fake-access-token", opener=Mock(side_effect=error),
+                )
+            output = "\n".join(logs.output)
+            self.assertIn("environment=github-actions", output)
+            self.assertIn(f"bytes={len(video_bytes)}", output)
+            self.assertIn(f"sha256={hashlib.sha256(video_bytes).hexdigest()}", output)
+            self.assertIn("api_version=v27.0", output)
+            self.assertIn("https_proxy_configured=True", output)
+            self.assertIn("response_status=400", output)
+            self.assertIn("proxy_http_request_error=True", output)
+            self.assertIn("fb_request_id_present=True", output)
+            self.assertNotIn("fake-access-token", output)
+            self.assertNotIn("secret-proxy.example", output)
+            self.assertNotIn(video_bytes.decode(), output)
+            self.assertNotIn("container-1", output)
+
+    def test_upload_diagnostics_are_off_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "final.mp4"
+            video.write_bytes(b"video")
+            with (
+                patch.dict(os.environ, {"INSTAGRAM_UPLOAD_DIAGNOSTICS": ""}),
+                patch("influencerai.services.instagram_service.LOGGER.warning") as warning,
+            ):
+                _upload_resumable(
+                    "https://rupload.facebook.com/ig-api-upload/v27.0/container-1",
+                    video,
+                    access_token="fake-access-token",
+                    opener=Mock(return_value=FakeResponse({"success": True})),
+                )
+            warning.assert_not_called()
+
+    def test_upload_diagnostics_report_success_and_transport_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "final.mp4"
+            video.write_bytes(b"video")
+            response = FakeResponse({"success": True})
+            with patch.dict(os.environ, {"INSTAGRAM_UPLOAD_DIAGNOSTICS": "1"}):
+                with self.assertLogs("influencerai.instagram", level="WARNING") as logs:
+                    _upload_resumable(
+                        "https://rupload.facebook.com/ig-api-upload/v27.0/container-1",
+                        video, access_token="fake-access-token", opener=Mock(return_value=response),
+                    )
+                self.assertIn("response_status=200", "\n".join(logs.output))
+                with (
+                    self.assertLogs("influencerai.instagram", level="WARNING") as logs,
+                    self.assertRaises(RuntimeError),
+                ):
+                    _upload_resumable(
+                        "https://rupload.facebook.com/ig-api-upload/v27.0/container-1",
+                        video, access_token="fake-access-token", opener=Mock(side_effect=TimeoutError()),
+                    )
+                self.assertIn("transport_error=TimeoutError", "\n".join(logs.output))
 
 
 if __name__ == "__main__":

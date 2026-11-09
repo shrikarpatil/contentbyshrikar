@@ -18,7 +18,7 @@ on:
         type: boolean
       instagram_upload:
         description: "Publish to Instagram Reels"
-        default: false
+        default: true
         type: boolean
 
 concurrency:

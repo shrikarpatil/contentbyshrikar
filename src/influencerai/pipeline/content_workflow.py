@@ -12,7 +12,7 @@ import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -108,7 +108,7 @@ AgentRunner = Callable[[Any, str], Awaitable[Any]]
 VideoGenerator = Callable[..., Path]
 MAX_SCREENPLAY_REVISIONS = 2
 MAX_REVIEW_REVISIONS = 2
-MAX_TOPIC_SELECTION_ATTEMPTS = 3
+MAX_TOPIC_SELECTION_ATTEMPTS = 6
 MAX_AGENT_RETRIES = 2
 MAX_TOPIC_HISTORY = 50
 TRANSIENT_AGENT_ERRORS = (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)
@@ -514,12 +514,13 @@ async def run_content_workflow(
     run_directory = _create_content_run_directory(settings.output_directory)
 
     LOGGER.info("Starting topic-to-video workflow with model %s.", settings.openai_model)
-    current_date = datetime.now().astimezone().date().isoformat()
+    today = datetime.now().astimezone().date()
+    current_date = today.isoformat()
     topic_history = _load_topic_history(settings.output_directory)
     previous_topics = [entry["topic"] for entry in topic_history]
     previous_genres = [entry["genre"] for entry in topic_history[-8:] if entry["genre"] != "unspecified"]
     genre_guidance = ", ".join(APPROPRIATE_GENRES)
-    recent_topics = "\n".join(f"- {title}" for title in previous_topics[-20:]) or "- None recorded yet"
+    recent_topics = "\n".join(f"- {title}" for title in previous_topics) or "- None recorded yet"
     recent_genres = ", ".join(previous_genres[-6:]) or "No genre history yet"
     topic_prompt = (
         f"Today is {current_date}. Find one currently trending, high-potential faceless short-form video opportunity. "
@@ -535,32 +536,51 @@ async def run_content_workflow(
     )
     topic: str | None = None
     topic_failures: list[str] = []
+    rejected_candidates: list[str] = []
+    discovery_focuses = (
+        "science and space, nature and wildlife, environment and climate",
+        "culture and arts, food, travel and geography, history and archaeology",
+        "sports, entertainment and gaming, human-interest and everyday ingenuity",
+        "business and economics, education and learning, engineering and inventions",
+        "a broad mix of India-relevant and globally relevant stories across all appropriate genres",
+    )
     for attempt in range(MAX_TOPIC_SELECTION_ATTEMPTS):
         topic_value = await _invoke_with_retries(invoke, agent_bundle.topic_generator, topic_prompt)
+        candidate_title = ""
         if not isinstance(topic_value, str) or not topic_value.strip():
             issue = "Topic Generator returned empty or non-text output."
         else:
             topic = topic_value.strip()
+            candidate_title = _topic_title(topic)
             _write_text(run_directory / f"topic-generator-attempt-{attempt + 1:02d}.md", topic)
             try:
-                _validate_trend_evidence(topic)
-                title = _topic_title(topic)
-                if _is_repeated_topic(title, previous_topics):
-                    issue = f"Topic repeats or closely resembles a previous topic: {title}"
+                _validate_trend_evidence(topic, today=today)
+                if _is_repeated_topic(candidate_title, previous_topics):
+                    issue = f"Topic repeats or closely resembles a previous topic: {candidate_title}"
                 else:
                     topic_failures = []
                     break
             except ValueError as exc:
                 issue = str(exc)
         topic_failures.append(issue)
+        rejected_candidates.append(f"- {candidate_title or '[no usable title]'}: {issue}")
+        LOGGER.warning("Topic discovery attempt %d/%d rejected: %s", attempt + 1, MAX_TOPIC_SELECTION_ATTEMPTS, issue)
         if attempt + 1 < MAX_TOPIC_SELECTION_ATTEMPTS:
             topic_prompt = (
-                "Your previous topic candidate could not be used. Find a different, currently trending opportunity, "
+                f"Today is {current_date}. Your previous topic candidate could not be used. "
+                "Use fresh web searches to find a different, currently trending opportunity, "
                 "preferably in a different appropriate genre. Do not invent trend evidence. "
                 f"{AUDIENCE_CONTEXT} "
+                f"For this search explore {discovery_focuses[attempt]}, but select another appropriate genre "
+                "if it has stronger verified evidence. Do not reuse any rejected or previously used story, "
+                "even with a different headline. Search multiple independent recent sources. "
                 "In TREND EVIDENCE, include an explicit publication/event date in ISO YYYY-MM-DD or Month D, YYYY format "
                 "on each supporting signal line, and put the corresponding source URLs in SOURCES. Avoid vague dates. "
-                f"Return the required format with GENRE and dated evidence.\n\nREASON TO RESELECT:\n{issue}\n\n"
+                f"Recent signals must be dated from {(today - timedelta(days=7)).isoformat()} to {current_date}; "
+                f"for {(today - timedelta(days=14)).isoformat()} through {(today - timedelta(days=8)).isoformat()}, "
+                "include at least two dated signals and two source URLs showing continuing interest. "
+                "Return the required format with GENRE and dated evidence.\n\n"
+                f"ALL REJECTED CANDIDATES AND REASONS:\n{chr(10).join(rejected_candidates)}\n\n"
                 f"RECENTLY USED TOPICS:\n{recent_topics}\n\nRECENT GENRES: {recent_genres}"
             )
     if topic is None or topic_failures:

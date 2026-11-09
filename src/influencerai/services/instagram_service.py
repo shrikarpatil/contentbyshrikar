@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from influencerai.config.settings import Settings
@@ -148,10 +148,9 @@ def _graph_request(
 
 
 def _upload_resumable(
-    container_id: str,
+    upload_uri: str,
     video_path: Path,
     *,
-    api_version: str,
     access_token: str,
     opener: Callable[..., Any] = urlopen,
 ) -> None:
@@ -159,7 +158,7 @@ def _upload_resumable(
     if video_size <= 0 or video_size > MAX_VIDEO_UPLOAD_BYTES:
         raise ValueError(f"Instagram Reel MP4 must be between 1 byte and {MAX_VIDEO_UPLOAD_BYTES} bytes.")
     request = Request(
-        f"https://rupload.facebook.com/ig-api-upload/{api_version}/{container_id}",
+        upload_uri,
         data=video_path.read_bytes(),
         headers={
             "Authorization": f"OAuth {access_token}",
@@ -248,11 +247,22 @@ def publish_reel(
     container_id = str(container.get("id", ""))
     if not container_id:
         raise RuntimeError("Instagram API created no Reel media container.")
+    upload_uri = container.get("uri")
+    if not isinstance(upload_uri, str):
+        raise RuntimeError("Instagram API did not return a Reel upload URI.")
+    parsed_uri = urlsplit(upload_uri)
+    if (
+        parsed_uri.scheme != "https"
+        or parsed_uri.netloc.lower() != "rupload.facebook.com"
+        or not re.fullmatch(r"/ig-api-upload/v\d+\.\d+/" + re.escape(container_id), parsed_uri.path)
+        or parsed_uri.query
+        or parsed_uri.fragment
+    ):
+        raise RuntimeError("Instagram API returned an invalid Reel upload URI.")
 
     _upload_resumable(
-        container_id,
+        upload_uri,
         video_path,
-        api_version=api_version,
         access_token=settings.instagram_access_token,
         opener=opener,
     )

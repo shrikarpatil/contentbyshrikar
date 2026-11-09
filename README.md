@@ -91,6 +91,8 @@ For GitHub Actions, add `INSTAGRAM_ACCESS_TOKEN` and `INSTAGRAM_USER_ID` as secr
 
 If the token is rejected as malformed, replace `INSTAGRAM_ACCESS_TOKEN` with the access token alone on one line, without spaces, line breaks, quotes, or a `Bearer` prefix. Do not share the token in logs or chat.
 
+For upload troubleshooting, GitHub Actions logs sanitized request and response diagnostics. To enable the same diagnostics locally, set `INSTAGRAM_UPLOAD_DIAGNOSTICS=1` in your shell before running the upload. The logs include the video size and SHA-256 fingerprint, operating system, Python version, configured proxy presence, request metadata, HTTP status, and selected response-header indicators; they do not include the access token, proxy URLs, or video contents. Matching fingerprints confirm the same video was used. The workflow does not retain the MP4 in its artifacts. Uploading an existing video with `--instagram-upload-video` publishes it if successful.
+
 For photorealistic images, select the OpenAI image provider; the offline local provider remains a stylized illustration fallback. OpenAI image generation may incur charges depending on model and settings; set `IMAGE_COST_PER_IMAGE_USD` to record an estimate in the run manifest.
 
 ## Deploying on GitHub Actions

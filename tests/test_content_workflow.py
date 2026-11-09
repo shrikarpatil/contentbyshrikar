@@ -20,6 +20,7 @@ from influencerai.pipeline.content_workflow import (
     _publish_to_targets,
     _is_repeated_topic,
     _load_topic_history,
+    MAX_TOPIC_SELECTION_ATTEMPTS,
     extract_hashtags,
     _save_topic_history,
     _topic_genre,
@@ -335,6 +336,80 @@ class ContentWorkflowTests(unittest.TestCase):
             self.assertIn("different appropriate genre", topic_prompts[1])
             saved_topic = (result.run_directory / "topic-generator-output.md").read_text(encoding="utf-8")
             self.assertIn("A newly documented deep sea species", saved_topic)
+
+    def test_topic_retries_keep_date_history_and_all_rejected_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            repeated = current_topic_opportunity("India's indigenous GPU development plan", "technology and AI")
+            stale = (
+                "TOPIC: A past archaeology discovery\nGENRE: history and archaeology\n"
+                "TREND EVIDENCE:\n- Report dated 2001-01-01.\n"
+                "SOURCES:\n- https://example.com/old-discovery\n"
+            )
+            fresh = current_topic_opportunity("A recent wildlife conservation discovery", "nature and wildlife")
+            candidates = iter([repeated, stale, repeated, fresh])
+            prompts: list[str] = []
+            responses = iter([
+                "RESEARCH: Verified source-backed facts",
+                Screenplay.model_validate(screenplay_payload()),
+                ScreenplayReview.model_validate(approved_review()),
+            ])
+
+            async def fake_agent_runner(agent, prompt):
+                if agent is bundle.topic_generator:
+                    prompts.append(prompt)
+                    return next(candidates)
+                return next(responses)
+
+            history = [{"topic": f"Historic topic {i}", "genre": "science and space"} for i in range(25)]
+            history[0]["topic"] = "India's indigenous GPU development plan"
+            _save_topic_history(settings.output_directory, history)
+            result = asyncio.run(run_content_workflow(
+                settings=settings,
+                agents=bundle,
+                agent_runner=fake_agent_runner,
+                video_generator=Mock(return_value=root / "final.mp4"),
+            ))
+
+            self.assertEqual(len(prompts), 4)
+            self.assertIn("India's indigenous GPU development plan", prompts[0])
+            self.assertIn("Today is " + datetime.now().astimezone().date().isoformat(), prompts[3])
+            self.assertIn("India's indigenous GPU development plan", prompts[3])
+            self.assertIn("A past archaeology discovery", prompts[3])
+            self.assertIn("stale or future-dated", prompts[3])
+            saved_topic = (result.run_directory / "topic-generator-output.md").read_text(encoding="utf-8")
+            self.assertIn("A recent wildlife conservation discovery", saved_topic)
+
+    def test_topic_retry_exhaustion_does_not_render_or_save_topic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            repeated = current_topic_opportunity("India's indigenous GPU development plan", "technology and AI")
+            _save_topic_history(settings.output_directory, [
+                {"topic": "India's indigenous GPU development plan", "genre": "technology and AI"}
+            ])
+            prompts: list[str] = []
+            generator = Mock()
+
+            async def fake_agent_runner(agent, prompt):
+                self.assertIs(agent, bundle.topic_generator)
+                prompts.append(prompt)
+                return repeated
+
+            with self.assertRaisesRegex(ValueError, "Could not select a fresh, trend-verified topic"):
+                asyncio.run(run_content_workflow(
+                    settings=settings,
+                    agents=bundle,
+                    agent_runner=fake_agent_runner,
+                    video_generator=generator,
+                ))
+
+            self.assertEqual(len(prompts), MAX_TOPIC_SELECTION_ATTEMPTS)
+            generator.assert_not_called()
+            self.assertEqual(len(_load_topic_history(settings.output_directory)), 1)
 
     def test_invalid_screenplay_output_is_retried_with_validation_feedback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

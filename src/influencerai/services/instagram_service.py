@@ -35,6 +35,11 @@ def validate_instagram_settings(settings: Settings) -> None:
     """Fail early when Reels publishing credentials are incomplete or malformed."""
     if not settings.instagram_access_token:
         raise ValueError("Set INSTAGRAM_ACCESS_TOKEN in .env or GitHub Actions secrets to publish Reels.")
+    if not re.fullmatch(r"[!-~]+", settings.instagram_access_token):
+        raise ValueError(
+            "INSTAGRAM_ACCESS_TOKEN contains whitespace or invalid characters. "
+            "Replace the secret with the access token only, on a single line."
+        )
     if not settings.instagram_user_id or not settings.instagram_user_id.isdigit():
         raise ValueError("Set INSTAGRAM_USER_ID to the numeric Instagram Professional Account ID.")
     if not re.fullmatch(r"v\d+\.\d+", settings.instagram_graph_api_version):

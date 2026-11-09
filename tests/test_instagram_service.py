@@ -80,6 +80,16 @@ class InstagramServiceTests(unittest.TestCase):
                 )
             )
 
+    def test_malformed_token_is_rejected_without_exposing_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Settings.from_env(project_root=Path(temp_dir))
+            for token in ("fake-token\n", "fake\rtoken", "fake token", "fake\ttoken", "fake\u00e9token"):
+                with self.subTest(token_type=repr(token[-1])):
+                    settings = replace(base, instagram_access_token=token, instagram_user_id="1234567890")
+                    with self.assertRaisesRegex(ValueError, "INSTAGRAM_ACCESS_TOKEN contains whitespace or invalid characters") as caught:
+                        validate_instagram_settings(settings)
+                    self.assertNotIn(token, str(caught.exception))
+
     def test_publish_reel_creates_uploads_polls_and_publishes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -108,6 +108,7 @@ AgentRunner = Callable[[Any, str], Awaitable[Any]]
 VideoGenerator = Callable[..., Path]
 MAX_SCREENPLAY_REVISIONS = 2
 MAX_REVIEW_REVISIONS = 2
+MAX_EDITORIAL_REVISIONS = 2
 MAX_TOPIC_SELECTION_ATTEMPTS = 6
 MAX_AGENT_RETRIES = 2
 MAX_TOPIC_HISTORY = 50
@@ -494,6 +495,47 @@ def _validated_review(value: Any) -> ScreenplayReview:
     return ScreenplayReview.model_validate(value)
 
 
+async def _review_screenplay(
+    screenplay: Screenplay,
+    topic: str,
+    research: str,
+    reviewer: Any,
+    invoke: AgentRunner,
+    run_directory: Path,
+    revision: int,
+) -> ScreenplayReview:
+    prompt = (
+        "Review this screenplay strictly against the opportunity and research. Evaluate the first spoken sentence and first visual, "
+        "identify any scene that stalls the story, and verify that the ending delivers the opening's promise. "
+        "If the hook's core promise remains unresolved, recommend revision with a specific actionable change. "
+        "Return only the structured review.\n\n"
+        f"{AUDIENCE_CONTEXT}\n\n"
+        f"CONTENT OPPORTUNITY:\n{topic}\n\nRESEARCH PACKAGE:\n{research}\n\n"
+        f"SCREENPLAY JSON:\n{screenplay.model_dump_json(indent=2)}"
+    )
+    last_error: ValidationError | None = None
+    for attempt in range(MAX_REVIEW_REVISIONS + 1):
+        value = await _invoke_with_retries(invoke, reviewer, prompt)
+        try:
+            return _validated_review(value)
+        except ValidationError as exc:
+            last_error = exc
+            raw_output = value if isinstance(value, str) else repr(value)
+            prefix = "review" if revision == 0 else f"review-revision-{revision:02d}"
+            _write_text(run_directory / f"{prefix}-attempt-{attempt + 1:02d}-invalid.txt", raw_output)
+            if attempt < MAX_REVIEW_REVISIONS:
+                prompt = (
+                    "Your prior output did not match the structured review schema. Correct the validation issues and "
+                    "return only a valid review object. Do not change the screenplay or invent new evidence.\n\n"
+                    f"VALIDATION ISSUES:\n{exc}\n\nPREVIOUS OUTPUT:\n{raw_output}\n\n"
+                    f"CONTENT OPPORTUNITY:\n{topic}\n\nRESEARCH PACKAGE:\n{research}\n\n"
+                    f"SCREENPLAY JSON:\n{screenplay.model_dump_json(indent=2)}"
+                )
+    raise ValueError(
+        f"Reviewer returned an invalid structured review after {MAX_REVIEW_REVISIONS} revision attempts: {last_error}"
+    )
+
+
 async def run_content_workflow(
     *,
     settings: Settings | None = None,
@@ -718,40 +760,48 @@ async def run_content_workflow(
     screenplay_path = run_directory / "screenplay.json"
     screenplay_path.write_text(screenplay.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
-    review_prompt = (
-        "Review this screenplay strictly against the opportunity and research. Evaluate the first spoken sentence and first visual, "
-        "identify any scene that stalls the story, and verify that the ending delivers the opening's promise. "
-        "If the hook's core promise remains unresolved, recommend revision with a specific actionable change. "
-        "Return only the structured review.\n\n"
-        f"{AUDIENCE_CONTEXT}\n\n"
-        f"CONTENT OPPORTUNITY:\n{topic}\n\nRESEARCH PACKAGE:\n{research}\n\n"
-        f"SCREENPLAY JSON:\n{screenplay.model_dump_json(indent=2)}"
-    )
-    review: ScreenplayReview | None = None
-    last_review_error: ValidationError | None = None
-    for attempt in range(MAX_REVIEW_REVISIONS + 1):
-        review_value = await _invoke_with_retries(invoke, agent_bundle.reviewer, review_prompt)
-        try:
-            review = _validated_review(review_value)
-            break
-        except ValidationError as exc:
-            last_review_error = exc
-            raw_output = review_value if isinstance(review_value, str) else repr(review_value)
-            _write_text(run_directory / f"review-attempt-{attempt + 1:02d}-invalid.txt", raw_output)
-            if attempt >= MAX_REVIEW_REVISIONS:
-                break
-            review_prompt = (
-                "Your prior output did not match the structured review schema. Correct the validation issues and "
-                "return only a valid review object. Do not change the screenplay or invent new evidence.\n\n"
-                f"VALIDATION ISSUES:\n{exc}\n\nPREVIOUS OUTPUT:\n{raw_output}\n\n"
-                f"SCREENPLAY JSON:\n{screenplay.model_dump_json(indent=2)}"
-            )
-    if review is None:
-        raise ValueError(
-            f"Reviewer returned an invalid structured review after {MAX_REVIEW_REVISIONS} revision attempts: "
-            f"{last_review_error}"
-        )
+    review = await _review_screenplay(screenplay, topic, research, agent_bundle.reviewer, invoke, run_directory, 0)
     (run_directory / "review.json").write_text(review.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+    revision_issue = ""
+    for revision in range(1, MAX_EDITORIAL_REVISIONS + 1):
+        if review.approves_video_generation or review.decision != "revise":
+            break
+        _write_text(run_directory / f"editorial-review-{revision:02d}.json", review.model_dump_json(indent=2) + "\n")
+        LOGGER.warning(
+            "Reviewer requested revision (%.1f/10); rewriting screenplay %d/%d.",
+            review.overall_score, revision, MAX_EDITORIAL_REVISIONS,
+        )
+        prompt = (
+            "Revise this screenplay to address the reviewer's feedback. Preserve the supported facts and the "
+            "story's distinctive tone; do not invent facts, sources, or claims. Keep surreal imagery clearly "
+            "metaphorical and return a valid structured screenplay with 4 or 5 scenes.\n\n"
+            f"{AUDIENCE_CONTEXT}\n\nCONTENT OPPORTUNITY:\n{topic}\n\nRESEARCH PACKAGE:\n{research}\n\n"
+            f"REVIEW:\n{review.model_dump_json(indent=2)}\n\n"
+            f"CURRENT SCREENPLAY:\n{screenplay.model_dump_json(indent=2)}"
+        )
+        if revision_issue:
+            prompt += f"\n\nPREVIOUS REVISION VALIDATION ERROR:\n{revision_issue}"
+        value = await _invoke_with_retries(invoke, agent_bundle.screenplay_writer, prompt)
+        try:
+            candidate = _validated_screenplay(value)
+        except ValidationError as exc:
+            revision_issue = f"Invalid structured screenplay: {exc}"
+            raw = value if isinstance(value, str) else repr(value)
+            _write_text(run_directory / f"editorial-screenplay-{revision:02d}-invalid.txt", raw)
+            LOGGER.warning("Editorial revision %d returned invalid screenplay: %s", revision, exc)
+            continue
+        if not MIN_PRODUCTION_SCENES <= len(candidate.scenes) <= MAX_PRODUCTION_SCENES:
+            revision_issue = f"Must have {MIN_PRODUCTION_SCENES}-{MAX_PRODUCTION_SCENES} scenes; got {len(candidate.scenes)}."
+            _write_text(run_directory / f"editorial-screenplay-{revision:02d}-invalid.json", candidate.model_dump_json(indent=2) + "\n")
+            LOGGER.warning("Editorial revision %d failed validation: %s", revision, revision_issue)
+            continue
+        revision_issue = ""
+        _write_text(run_directory / f"editorial-screenplay-{revision:02d}.json", candidate.model_dump_json(indent=2) + "\n")
+        review = await _review_screenplay(candidate, topic, research, agent_bundle.reviewer, invoke, run_directory, revision)
+        screenplay = candidate
+        screenplay_path.write_text(screenplay.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        (run_directory / "review.json").write_text(review.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     if not review.approves_video_generation:
         LOGGER.warning(

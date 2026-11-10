@@ -517,11 +517,103 @@ class ContentWorkflowTests(unittest.TestCase):
         video_generator.assert_called_once()
         self.assertEqual(result.video_path, video_generator.return_value)
 
-    def test_revise_decision_stops_before_video_generation(self) -> None:
-        result, video_generator = self.run_workflow("revise")
+    def test_reviewer_revision_is_rewritten_and_reviewed_before_render(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            revised = screenplay_payload()
+            revised["video_title"] = "Revised Story"
+            responses = iter([
+                current_topic_opportunity(), "RESEARCH: Verified source-backed facts",
+                screenplay_payload(), approved_review("revise"), revised, approved_review(),
+            ])
+            prompts = []
+
+            async def runner(agent, prompt):
+                prompts.append((agent, prompt))
+                return next(responses)
+
+            generator = Mock(return_value=root / "final.mp4")
+            result = asyncio.run(run_content_workflow(settings=settings, agents=bundle, agent_runner=runner, video_generator=generator))
+            generator.assert_called_once()
+            self.assertEqual(result.review.decision, "approve")
+            self.assertEqual(json.loads(result.screenplay_path.read_text(encoding="utf-8"))["video_title"], "Revised Story")
+            self.assertIn("Strengthen the opening hook", prompts[4][1])
+            self.assertIn("Verified source-backed facts", prompts[5][1])
+            self.assertTrue((result.run_directory / "editorial-review-01.json").is_file())
+            self.assertTrue((result.run_directory / "editorial-screenplay-01.json").is_file())
+
+    def test_reviewer_revision_exhaustion_never_renders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            responses = iter([
+                current_topic_opportunity(), "RESEARCH: Verified source-backed facts",
+                screenplay_payload(), approved_review("revise"),
+                screenplay_payload(), approved_review("revise"),
+                screenplay_payload(), approved_review("revise"),
+            ])
+
+            async def runner(agent, prompt):
+                return next(responses)
+
+            generator = Mock()
+            result = asyncio.run(run_content_workflow(settings=settings, agents=bundle, agent_runner=runner, video_generator=generator))
+            generator.assert_not_called()
+            self.assertIsNone(result.video_path)
+            self.assertEqual(result.review.decision, "revise")
+            self.assertTrue((result.run_directory / "editorial-review-02.json").is_file())
+
+    def test_invalid_revision_is_retried_without_reviewing_or_rendering_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            responses = iter([
+                current_topic_opportunity(), "RESEARCH: Verified source-backed facts",
+                screenplay_payload(), approved_review("revise"), screenplay_payload(scene_count=6),
+                screenplay_payload(), approved_review(),
+            ])
+            prompts = []
+
+            async def runner(agent, prompt):
+                prompts.append(prompt)
+                return next(responses)
+
+            generator = Mock(return_value=root / "final.mp4")
+            result = asyncio.run(run_content_workflow(settings=settings, agents=bundle, agent_runner=runner, video_generator=generator))
+            generator.assert_called_once()
+            self.assertIn("got 6", prompts[5])
+            self.assertTrue((result.run_directory / "editorial-screenplay-01-invalid.json").is_file())
+
+    def test_reviewer_reject_is_not_rewritten(self) -> None:
+        result, video_generator = self.run_workflow("reject")
         video_generator.assert_not_called()
         self.assertIsNone(result.video_path)
-        self.assertEqual(result.review.decision, "revise")
+        self.assertEqual(result.review.decision, "reject")
+
+    def test_revision_with_factual_blocker_never_renders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            blocked = approved_review()
+            blocked["factual_issues"] = ["Unsupported claim"]
+            responses = iter([
+                current_topic_opportunity(), "RESEARCH: Verified source-backed facts",
+                screenplay_payload(), approved_review("revise"), screenplay_payload(), blocked,
+            ])
+
+            async def runner(agent, prompt):
+                return next(responses)
+
+            generator = Mock()
+            result = asyncio.run(run_content_workflow(settings=settings, agents=bundle, agent_runner=runner, video_generator=generator))
+            generator.assert_not_called()
+            self.assertEqual(result.review.factual_issues, ["Unsupported claim"])
+            self.assertIsNone(result.video_path)
 
     def test_wrong_scene_count_is_revised_before_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -33,7 +33,7 @@ Return a concise `GENRE:` field identifying the primary genre and make the relev
 
 - Treat the current date included in the task as the date to evaluate against.
 - Search for new developments and coverage available as of that date using fresh, varied date-aware queries. Avoid repeating previously used or rejected stories, even if they appear again in search results.
-- Prefer a development, conversation, or search-interest signal from the last **7 days**. A story up to **14 days** old is acceptable only if there is evidence that interest is rising or sustained.
+- Prefer a development, conversation, or search-interest signal from the last **10 days**. A story up to **21 days** old is acceptable only if there is evidence that interest is rising or sustained.
 - Verify recency with dated web sources and preferably more than one independent signal (for example, multiple recent reputable reports, an official announcement plus current coverage, or an available trend/search-interest signal).
 - Preserve the exact publication/event dates and URLs supporting the trend evidence. A new article that merely recaps an old story is not, by itself, proof that the topic is trending now.
 - If you cannot verify a currently trending opportunity, say so in `TREND EVIDENCE` and lower confidence; do not label it trending or invent momentum.
@@ -223,7 +223,7 @@ SHAREABILITY:
 [Why someone might share the video]
 
 TREND EVIDENCE:
-[One bullet per independent signal, with its event or publication date (YYYY-MM-DD) and what current interest/trend signal it supports. Prefer signals from the last 7 days; for an 8–14-day-old story include at least two independent signals showing momentum continues. Put the corresponding HTTPS source URLs in SOURCES below.]
+[One bullet per independent signal, with its event or publication date (YYYY-MM-DD) and what current interest/trend signal it supports. Prefer signals from the last 10 days; for an 11–21-day-old story include at least two independent signals showing momentum continues. Put the corresponding HTTPS source URLs in SOURCES below.]
 
 SOURCES:
 - [Source]

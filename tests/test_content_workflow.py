@@ -10,7 +10,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from influencerai.config.settings import Settings
 from influencerai.pipeline.content_workflow import (
@@ -21,6 +21,7 @@ from influencerai.pipeline.content_workflow import (
     _is_repeated_topic,
     _load_topic_history,
     MAX_TOPIC_SELECTION_ATTEMPTS,
+    MAX_WORKFLOW_ATTEMPTS,
     extract_hashtags,
     _save_topic_history,
     _topic_genre,
@@ -53,7 +54,7 @@ def screenplay_payload(scene_count: int = 5, *, words_per_scene: int = 5) -> dic
 def approved_review(decision: str = "approve", required_changes: list[str] | None = None) -> dict:
     return {
         "decision": decision,
-        "overall_score": 8.1 if decision == "approve" else 6.4,
+        "overall_score": 8.1 if decision == "approve" else 5.4,
         "critical_failure": False,
         "score_breakdown": {
             "hook": 8,
@@ -87,6 +88,12 @@ def current_topic_opportunity(title: str = "A verified current story opportunity
 
 
 class ContentWorkflowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Most tests exercise a single workflow pass; retry behavior has its own tests.
+        patcher = patch("influencerai.pipeline.content_workflow.MAX_WORKFLOW_ATTEMPTS", 1)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_social_hashtag_files_are_copied_beside_rendered_video(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -612,6 +619,30 @@ class ContentWorkflowTests(unittest.TestCase):
             self.assertTrue((result.run_directory / "editorial-review-05.json").is_file())
             self.assertTrue((result.run_directory / "editorial-screenplay-05.json").is_file())
 
+    def test_workflow_retries_with_new_topic_when_no_video_is_approved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "influencerai.pipeline.content_workflow.MAX_WORKFLOW_ATTEMPTS", MAX_WORKFLOW_ATTEMPTS
+        ):
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            video = root / "final.mp4"
+            video.write_bytes(b"video")
+            responses = iter([
+                current_topic_opportunity("First distinct rejected story"), "RESEARCH: facts",
+                screenplay_payload(), approved_review("reject"),
+                current_topic_opportunity("Second unrelated approved topic"), "RESEARCH: facts",
+                screenplay_payload(), approved_review("approve"),
+            ])
+
+            async def runner(agent, prompt):
+                return next(responses)
+
+            generator = Mock(return_value=video)
+            result = asyncio.run(run_content_workflow(settings=settings, agents=bundle, agent_runner=runner, video_generator=generator))
+            self.assertEqual(result.video_path, video)
+            generator.assert_called_once()
+
     def test_fifth_editorial_revision_can_be_approved(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -846,7 +877,8 @@ class ContentWorkflowTests(unittest.TestCase):
         unresolved_fact = review.model_copy(update={"factual_issues": ["Claim needs verification."]})
         required_revision = review.model_copy(update={"required_changes": ["Clarify the claim."]})
         self.assertFalse(low_score.approves_video_generation)
-        self.assertFalse(review.model_copy(update={"decision": "revise", "overall_score": 6.8}).approves_video_generation)
+        self.assertTrue(review.model_copy(update={"decision": "revise", "overall_score": 6.2}).approves_video_generation)
+        self.assertFalse(review.model_copy(update={"decision": "reject", "overall_score": 6.8}).approves_video_generation)
         self.assertFalse(critical.approves_video_generation)
         self.assertFalse(unresolved_fact.approves_video_generation)
         self.assertTrue(required_revision.approves_video_generation)

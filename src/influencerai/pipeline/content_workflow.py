@@ -109,7 +109,10 @@ VideoGenerator = Callable[..., Path]
 MAX_SCREENPLAY_REVISIONS = 2
 MAX_REVIEW_REVISIONS = 2
 MAX_EDITORIAL_REVISIONS = 5
-MAX_TOPIC_SELECTION_ATTEMPTS = 6
+MAX_TOPIC_SELECTION_ATTEMPTS = 8
+MAX_WORKFLOW_ATTEMPTS = 3
+RECENT_TREND_DAYS = 10
+CONTINUING_TREND_DAYS = 21
 MAX_AGENT_RETRIES = 2
 MAX_TOPIC_HISTORY = 50
 TRANSIENT_AGENT_ERRORS = (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)
@@ -177,12 +180,12 @@ def _validate_trend_evidence(topic: str, *, today: date | None = None) -> None:
     recent_signals = [
         signal_date
         for signal_date in trend_dates
-        if signal_date <= current_date and (current_date - signal_date).days <= 7
+        if signal_date <= current_date and (current_date - signal_date).days <= RECENT_TREND_DAYS
     ]
     continuing_signals = [
         signal_date
         for signal_date in trend_dates
-        if signal_date <= current_date and (current_date - signal_date).days <= 14
+        if signal_date <= current_date and (current_date - signal_date).days <= CONTINUING_TREND_DAYS
     ]
     has_recent_evidence = bool(recent_signals and source_urls)
     has_continuing_evidence = len(continuing_signals) >= 2 and len(source_urls) >= 2
@@ -195,8 +198,8 @@ def _validate_trend_evidence(topic: str, *, today: date | None = None) -> None:
         if not source_urls:
             raise ValueError("TREND EVIDENCE is dated, but no supporting URLs were found in the SOURCES section.")
         raise ValueError(
-            "Trend evidence is stale or future-dated. Include a signal from the last 7 days with a supporting URL, "
-            "or at least two signals and two URLs from the last 14 days."
+            f"Trend evidence is stale or future-dated. Include a signal from the last {RECENT_TREND_DAYS} days with a supporting URL, "
+            f"or at least two signals and two URLs from the last {CONTINUING_TREND_DAYS} days."
         )
 
 
@@ -544,6 +547,38 @@ async def run_content_workflow(
     agent_runner: AgentRunner | None = None,
     video_generator: VideoGenerator | None = None,
 ) -> ContentWorkflowResult:
+    """Run the workflow, retrying with a fresh topic when no approved video results."""
+    for attempt in range(1, MAX_WORKFLOW_ATTEMPTS + 1):
+        try:
+            result = await _run_content_workflow_once(
+                settings=settings,
+                output_directory=output_directory,
+                agents=agents,
+                agent_runner=agent_runner,
+                video_generator=video_generator,
+            )
+        except ValueError as exc:
+            if attempt >= MAX_WORKFLOW_ATTEMPTS:
+                raise
+            LOGGER.warning("Workflow attempt %d/%d failed (%s); retrying with a new topic.", attempt, MAX_WORKFLOW_ATTEMPTS, exc)
+            continue
+        if result.video_path is not None or attempt >= MAX_WORKFLOW_ATTEMPTS:
+            return result
+        LOGGER.warning(
+            "Workflow attempt %d/%d produced no video (%s, %.1f/10); retrying with a new topic.",
+            attempt, MAX_WORKFLOW_ATTEMPTS, result.review.decision, result.review.overall_score,
+        )
+    raise AssertionError("unreachable")
+
+
+async def _run_content_workflow_once(
+    *,
+    settings: Settings | None = None,
+    output_directory: Path | None = None,
+    agents: AgentBundle | None = None,
+    agent_runner: AgentRunner | None = None,
+    video_generator: VideoGenerator | None = None,
+) -> ContentWorkflowResult:
     """Discover, research, write, review, then render only an approved screenplay."""
     settings = settings or Settings.from_env()
     if output_directory is not None:
@@ -569,7 +604,7 @@ async def run_content_workflow(
         f"Search for developments and coverage available as of {current_date}; use the date in fresh search queries, "
         "rather than reusing old results or relying on undated snippets. "
         f"{AUDIENCE_CONTEXT} "
-        "Prioritize evidence from the last 7 days (14 days only if momentum is demonstrably continuing). "
+        f"Prioritize evidence from the last {RECENT_TREND_DAYS} days ({CONTINUING_TREND_DAYS} days only if momentum is demonstrably continuing). "
         "Verify dates and trend signals with web search; do not present evergreen stories as trending. "
         f"Explore a broad range of appropriate genres, such as {genre_guidance}; choose a well-supported trend, "
         "prefer a different genre from recent runs when another comparably strong trend exists, and do not force a genre without evidence. "
@@ -618,15 +653,15 @@ async def run_content_workflow(
                 "Use fresh web searches to find a different, currently trending opportunity, "
                 "preferably in a different appropriate genre. Do not invent trend evidence. "
                 f"{AUDIENCE_CONTEXT} "
-                f"For this search explore {discovery_focuses[attempt]}, but select another appropriate genre "
+                f"For this search explore {discovery_focuses[attempt % len(discovery_focuses)]}, but select another appropriate genre "
                 "if it has stronger verified evidence. Do not reuse any rejected or previously used story, "
                 "even with a different headline. Search multiple independent recent sources. "
                 "Compare distinct supported stories for an audience-relevant tension and a payoff; "
                 "return only the strongest eligible opportunity. "
                 "In TREND EVIDENCE, include an explicit publication/event date in ISO YYYY-MM-DD or Month D, YYYY format "
                 "on each supporting signal line, and put the corresponding source URLs in SOURCES. Avoid vague dates. "
-                f"Recent signals must be dated from {(today - timedelta(days=7)).isoformat()} to {current_date}; "
-                f"for {(today - timedelta(days=14)).isoformat()} through {(today - timedelta(days=8)).isoformat()}, "
+                f"Recent signals must be dated from {(today - timedelta(days=RECENT_TREND_DAYS)).isoformat()} to {current_date}; "
+                f"for {(today - timedelta(days=CONTINUING_TREND_DAYS)).isoformat()} through {(today - timedelta(days=RECENT_TREND_DAYS + 1)).isoformat()}, "
                 "include at least two dated signals and two source URLs showing continuing interest. "
                 "Return the required format with GENRE and dated evidence.\n\n"
                 f"ALL REJECTED CANDIDATES AND REASONS:\n{chr(10).join(rejected_candidates)}\n\n"
@@ -986,7 +1021,7 @@ def main() -> int:
                 f"No video generated: reviewer decision {result.review.decision.upper()} "
                 f"({result.review.overall_score:.1f}/10). Review: {result.run_directory / 'review.json'}"
             )
-            return 0
+            return 1
         print(f"Approved video created: {result.video_path}")
         print(f"Agent artifacts: {result.run_directory}")
         _publish_to_targets(

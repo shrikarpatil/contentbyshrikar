@@ -244,7 +244,7 @@ Tier 3 sources can help discover stories or public reactions, but should general
 ## Current Trend Verification
 
 - Use the current date supplied in the task. Search for current coverage, activity, or search-interest evidence, not just background pages.
-- Prefer primary or authoritative sources published in the last 7 days. A story 8–14 days old is acceptable only if current sources establish that attention is continuing or increasing.
+- Prefer primary or authoritative sources published in the last 10 days. A story 11–21 days old is acceptable only if current sources establish that attention is continuing or increasing.
 - Record publication/event dates and URLs for trend evidence. Separate the date a story happened from the date an article was published.
 - A new article that merely recaps an old evergreen story does not prove that the story is currently trending.
 - If no credible recent evidence confirms a trend, explicitly say "Current trend not verified" and lower confidence; never fabricate trend rankings, search volume, or audience interest.

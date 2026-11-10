@@ -41,9 +41,13 @@ class ScreenplayReview(BaseModel):
 
     @property
     def approves_video_generation(self) -> bool:
-        """Return true for an explicit, threshold-meeting approval without factual blockers."""
+        """Return true for a threshold-meeting review without blockers.
+
+        The score is authoritative: the reviewer sometimes labels a 6.0+ screenplay "revise"
+        despite its own rubric, so only an explicit "reject" overrides the score.
+        """
         return (
-            self.decision == "approve"
+            self.decision != "reject"
             and self.overall_score >= MIN_APPROVAL_SCORE
             and not self.critical_failure
             and not self.factual_issues

@@ -231,6 +231,12 @@ Visuals should be:
 * Relevant to the narration
 * Suitable for AI video generation
 
+## Make the Images Weird
+
+Default to bold, bizarre, surreal visual ideas rather than safe stock footage. Make the viewer think, "What am I looking at?" while still understanding why it belongs in this story. Push scale, juxtaposition, transformation, and impossible-but-readable settings; give each scene one striking visual idea instead of piling unrelated oddities together. Make the opening image especially arresting, and let the images become stranger as the story develops.
+
+Keep the narration and factual claims grounded in the research. When an image is symbolic or impossible, explicitly label it in the visual direction as a surreal metaphor, not a literal event or documentary evidence. The weirdness should clarify, reframe, or amplify the story, never obscure it or imply an unsupported fact. Avoid generic neon sci-fi imagery unless the researched topic genuinely calls for it.
+
 ---
 
 # 6. Match Visuals to Narration
@@ -292,7 +298,7 @@ Do not sacrifice clarity simply to make the pacing faster.
 
 Write natural spoken language.
 
-The narration should sound like something a human creator would actually say.
+The narration should sound like something a human creator would actually say, but give it a distinctive bizarre, deadpan voice. The script itself should be strange too; do not leave all the weirdness to the visuals.
 
 Avoid overly formal language such as:
 
@@ -302,7 +308,9 @@ Prefer:
 
 > "And that's where things get interesting."
 
-Use conversational language while maintaining factual accuracy.
+Use conversational language while maintaining factual accuracy. Favor unexpected but understandable metaphors, absurd comparisons, dry understatement, and surreal turns of phrase. Aim for at least one memorable, clearly figurative oddity in each scene when it fits; make the narrator sound calmly reasonable while describing an unreasonable image or comparison. Keep the factual sentence clear, then let the weird phrasing sharpen its meaning rather than replace it.
+
+For example, a malfunctioning machine might be described as "a very expensive paperweight having an existential crisis" only if the surrounding narration makes clear that this is a joke, not a literal event. Do not invent quotes, motives, incidents, statistics, or consequences to make a line stranger. Avoid random non sequiturs, forced jokes, and metaphors that could be mistaken for researched facts.
 
 ---
 

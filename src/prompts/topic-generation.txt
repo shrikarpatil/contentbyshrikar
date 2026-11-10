@@ -17,6 +17,8 @@ Find a topic that has a strong combination of:
 
 The user wants topics that are trending now. Prioritize a current, demonstrable trend or a rapidly developing story with current audience interest; do not substitute an evergreen topic just because it is easy to explain.
 
+The desired editorial flavor is bizarre. Among candidates that meet the freshness and evidence requirements, strongly favor stories with a genuinely strange, absurd, improbable, or surreal-sounding real-world element. Aim for stories that make a viewer think, "That sounds made up" before the sources prove it happened. The event must be real; never add weirdness by exaggerating it.
+
 ## Primary Audience: India
 
 The primary audience is viewers in India. Search for India-specific trends and sources first, including regional developments and stories relevant to Indian daily life, culture, science, sport, entertainment, business, public services, and technology. Also consider global stories when there is a clear, explainable connection to Indian viewers. Do not force an India angle where none is supported by evidence, and do not assume all Indian viewers share one language, region, religion, or viewpoint. Prefer sources close to the event (official Indian institutions, local reporting, primary announcements) alongside reputable independent coverage. Keep the final opportunity understandable to a broad Indian audience.
@@ -58,11 +60,11 @@ Look across multiple relevant sources rather than relying on a single search res
 
 Identify at least three distinct candidate stories across suitable genres when the available evidence permits.
 Compare them internally before choosing one: for each, identify its specific current development, why an
-Indian viewer would care, an understandable tension or surprise, a payoff supported by evidence, and
-whether it can be shown with 4 or 5 still images. Prefer the story with the clearest combination of
-these qualities rather than the most dramatic headline or most familiar subject. Do not invent candidates,
-interest, or evidence to reach a quota; if fewer candidates can be verified, select the strongest supported
-one. Return only the selected opportunity in the existing output format.
+Indian viewer would care, an understandable tension or surprise, a payoff supported by evidence, how genuinely
+bizarre the documented event is, and whether it can be shown with 4 or 5 still images. Among comparably current
+and well-sourced candidates, prefer the strangest story with the clearest narrative, not simply the loudest headline.
+Do not invent candidates, interest, or evidence to reach a quota; if fewer candidates can be verified, select the
+strongest supported one. Return only the selected opportunity in the existing output format.
 
 ---
 
@@ -108,6 +110,10 @@ Would someone reasonably send this video to another person?
 
 Is there a reason this topic is relevant now?
 
+### 9. Genuine Bizarreness
+
+Is there a specific, documented detail that is unusually strange, absurd, or improbable without needing a misleading headline? Prefer the real oddity itself over an ordinary story dressed up with dramatic language.
+
 ---
 
 # Avoid
@@ -121,6 +127,8 @@ Do NOT select topics merely because they are:
 * Dependent on highly specialized knowledge
 * Based on unverified claims
 * Based solely on rumors
+* Made bizarre through exaggeration, conspiracy claims, or invented details
+* Dependent on mocking a culture, vulnerable person, or private individual
 * Already saturated unless there is a genuinely novel angle
 * Controversial simply for the sake of controversy
 
@@ -197,6 +205,9 @@ TARGET AUDIENCE:
 
 CORE STORY:
 [2–4 sentences explaining the story]
+
+BIZARRE ELEMENT:
+[The specific, source-supported detail that makes the real story genuinely strange; say "None" if the story has no such detail]
 
 HOOK POTENTIAL:
 [The strongest curiosity-driven opening idea]

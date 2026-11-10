@@ -8,6 +8,8 @@ Running `main.py` with no arguments executes the integrated workflow: trending-t
 
 Topic discovery makes up to six attempts, retaining rejected candidates and their reasons in later search prompts and exploring different genre groups. If no fresh, sufficiently dated candidate is found, the workflow stops rather than publishing a repeated or unverified topic; additional searches may incur API charges.
 
+Topic searches use the runner's current date and carry previous and rejected topics into retry prompts. Sources must still satisfy the freshness checks; date-aware searches do not guarantee unique results.
+
 Within each discovery attempt, the topic agent compares multiple supported stories when available and selects one with a clear audience-relevant angle and evidence-backed payoff. The writer considers alternative openings internally, and the reviewer checks that the first spoken line and visual create a clear promise that the ending fulfills. These are editorial judgments, not guarantees of engagement. The automatic approval and publishing flow remains unchanged; comparing additional candidates may increase search and agent costs.
 
 When the reviewer requests `revise`, the writer can make up to two editorial revisions using the research and review feedback, and each valid revision is reviewed again before rendering. If no revision passes, or the reviewer rejects the script, generation stops. These additional agent calls may incur API charges. Intermediate editorial screenplays and reviews are saved with the run artifacts.
@@ -22,7 +24,7 @@ FFmpeg is bundled via `imageio-ffmpeg`; an installed FFmpeg on PATH or `FFMPEG_P
 
 ## Commands
 
-Run the complete topic-to-video workflow. Video generation is gated on an explicit reviewer approval with a score of at least 7/10 and no critical failure:
+Run the complete topic-to-video workflow. Video generation is gated on an explicit reviewer approval with a score of at least 6/10, no critical failure, and no factual issues:
 
 ```powershell
 uv run python main.py

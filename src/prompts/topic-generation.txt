@@ -32,6 +32,7 @@ Return a concise `GENRE:` field identifying the primary genre and make the relev
 ## Trend Freshness Requirement
 
 - Treat the current date included in the task as the date to evaluate against.
+- Search for new developments and coverage available as of that date using fresh, varied date-aware queries. Avoid repeating previously used or rejected stories, even if they appear again in search results.
 - Prefer a development, conversation, or search-interest signal from the last **7 days**. A story up to **14 days** old is acceptable only if there is evidence that interest is rising or sustained.
 - Verify recency with dated web sources and preferably more than one independent signal (for example, multiple recent reputable reports, an official announcement plus current coverage, or an available trend/search-interest signal).
 - Preserve the exact publication/event dates and URLs supporting the trend evidence. A new article that merely recaps an old story is not, by itself, proof that the topic is trending now.

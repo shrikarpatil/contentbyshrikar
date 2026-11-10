@@ -27,7 +27,7 @@ from influencerai.pipeline.limits import (
     PREFERRED_VIDEO_DURATION_SECONDS,
 )
 from influencerai.pipeline.orchestrator import run_pipeline
-from influencerai.schemas.review import ScreenplayReview
+from influencerai.schemas.review import MIN_APPROVAL_SCORE, ScreenplayReview
 from influencerai.schemas.screenplay import Screenplay
 
 LOGGER = logging.getLogger("influencerai.content_workflow")
@@ -422,7 +422,7 @@ def create_agent_bundle(settings: Settings) -> AgentBundle:
         _read_prompt("reviewer.txt")
         + "\n\n"
         + "STRUCTURED REVIEW CONTRACT: Return the schema fields exactly. Use decision values approve, revise, or reject in lowercase. "
-        + "Approve only when the weighted score is at least 7.0 and there is no critical factual or logic failure. "
+        + f"Approve only when the weighted score is at least {MIN_APPROVAL_SCORE:.1f} and there is no critical factual or logic failure. "
         + "Set critical_failure=true for any critical failure listed in the review instructions. "
         + "A revise/reject decision must never be treated as approved for video generation. "
         + "When decision is approve, required_changes must be empty; put non-blocking suggestions in biggest_problems instead. "
@@ -566,6 +566,8 @@ async def run_content_workflow(
     recent_genres = ", ".join(previous_genres[-6:]) or "No genre history yet"
     topic_prompt = (
         f"Today is {current_date}. Find one currently trending, high-potential faceless short-form video opportunity. "
+        f"Search for developments and coverage available as of {current_date}; use the date in fresh search queries, "
+        "rather than reusing old results or relying on undated snippets. "
         f"{AUDIENCE_CONTEXT} "
         "Prioritize evidence from the last 7 days (14 days only if momentum is demonstrably continuing). "
         "Verify dates and trend signals with web search; do not present evergreen stories as trending. "
@@ -612,6 +614,7 @@ async def run_content_workflow(
         if attempt + 1 < MAX_TOPIC_SELECTION_ATTEMPTS:
             topic_prompt = (
                 f"Today is {current_date}. Your previous topic candidate could not be used. "
+                f"Search for developments and coverage available as of {current_date} with fresh, varied queries. "
                 "Use fresh web searches to find a different, currently trending opportunity, "
                 "preferably in a different appropriate genre. Do not invent trend evidence. "
                 f"{AUDIENCE_CONTEXT} "
@@ -641,7 +644,8 @@ async def run_content_workflow(
     research = await _invoke_with_retries(
         invoke,
         agent_bundle.topic_researcher,
-        f"Today is {current_date}. Research and verify both the facts and whether this opportunity is still trending now. "
+        f"Today is {current_date}. Search for the latest available sources as of {current_date}, "
+        "and research and verify both the facts and whether this opportunity is still trending now. "
         f"{AUDIENCE_CONTEXT} "
         "Check publication dates/current activity, preserve source URLs, and clearly label uncertainty. Do not write a screenplay.\n\n"
         f"CONTENT OPPORTUNITY:\n{topic}",

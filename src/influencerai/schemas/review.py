@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+MIN_APPROVAL_SCORE = 6.0
+
 
 class ScoreBreakdown(BaseModel):
     """Reviewer scores for the screenplay's quality dimensions."""
@@ -42,7 +44,7 @@ class ScreenplayReview(BaseModel):
         """Return true for an explicit, threshold-meeting approval without factual blockers."""
         return (
             self.decision == "approve"
-            and self.overall_score >= 7
+            and self.overall_score >= MIN_APPROVAL_SCORE
             and not self.critical_failure
             and not self.factual_issues
         )

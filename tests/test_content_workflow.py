@@ -419,6 +419,48 @@ class ContentWorkflowTests(unittest.TestCase):
             generator.assert_not_called()
             self.assertEqual(len(_load_topic_history(settings.output_directory)), 1)
 
+    def test_topic_search_uses_today_and_preserves_all_rejected_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = replace(Settings.from_env(project_root=root), output_directory=root / "output")
+            bundle = AgentBundle(object(), object(), object(), object())
+            _save_topic_history(settings.output_directory, [
+                {"topic": "Previously covered wildlife", "genre": "nature and wildlife"},
+            ])
+            old_date = (datetime.now().astimezone().date() - timedelta(days=30)).isoformat()
+            candidates = iter([
+                current_topic_opportunity("Previously covered wildlife"),
+                f"TOPIC: Old moon discovery\nTREND EVIDENCE:\n- {old_date} old report\nSOURCES:\n- https://example.com/old\n",
+                current_topic_opportunity("A new marine discovery"),
+            ])
+            responses = iter([
+                "RESEARCH: Verified source-backed facts", screenplay_payload(), approved_review(),
+            ])
+            topic_prompts = []
+            research_prompts = []
+
+            async def runner(agent, prompt):
+                if agent is bundle.topic_generator:
+                    topic_prompts.append(prompt)
+                    return next(candidates)
+                if agent is bundle.topic_researcher:
+                    research_prompts.append(prompt)
+                return next(responses)
+
+            asyncio.run(run_content_workflow(
+                settings=settings, agents=bundle, agent_runner=runner,
+                video_generator=Mock(return_value=root / "final.mp4"),
+            ))
+            today = datetime.now().astimezone().date().isoformat()
+            self.assertEqual(len(topic_prompts), 3)
+            for prompt in topic_prompts:
+                self.assertIn(f"Today is {today}", prompt)
+                self.assertIn(f"as of {today}", prompt)
+            self.assertIn("Previously covered wildlife", topic_prompts[2])
+            self.assertIn("Old moon discovery", topic_prompts[2])
+            self.assertIn("stale or future-dated", topic_prompts[2])
+            self.assertIn(f"as of {today}", research_prompts[0])
+
     def test_invalid_screenplay_output_is_retried_with_validation_feedback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -772,11 +814,14 @@ class ContentWorkflowTests(unittest.TestCase):
     def test_approval_property_requires_threshold_and_no_factual_blockers(self) -> None:
         review = ScreenplayReview.model_validate(approved_review())
         self.assertTrue(review.approves_video_generation)
-        low_score = review.model_copy(update={"overall_score": 6.9})
+        self.assertTrue(review.model_copy(update={"overall_score": 6.0}).approves_video_generation)
+        self.assertTrue(review.model_copy(update={"overall_score": 6.8}).approves_video_generation)
+        low_score = review.model_copy(update={"overall_score": 5.99})
         critical = review.model_copy(update={"critical_failure": True})
         unresolved_fact = review.model_copy(update={"factual_issues": ["Claim needs verification."]})
         required_revision = review.model_copy(update={"required_changes": ["Clarify the claim."]})
         self.assertFalse(low_score.approves_video_generation)
+        self.assertFalse(review.model_copy(update={"decision": "revise", "overall_score": 6.8}).approves_video_generation)
         self.assertFalse(critical.approves_video_generation)
         self.assertFalse(unresolved_fact.approves_video_generation)
         self.assertTrue(required_revision.approves_video_generation)

@@ -121,7 +121,7 @@ def assemble_video(
             "-filter_complex", ";".join(filters),
             "-map", "[vout]", "-map", "[aout]",
             "-t", f"{total_duration:.3f}",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22", "-threads", "2",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-maxrate", "8M", "-bufsize", "16M", "-threads", "2",
             "-pix_fmt", "yuv420p", "-r", str(settings.video_fps),
             "-c:a", "aac", "-ar", "48000", "-b:a", "112k", "-movflags", "+faststart", str(final_video),
         ]

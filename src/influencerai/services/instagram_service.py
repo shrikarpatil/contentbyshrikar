@@ -23,6 +23,20 @@ LOGGER = logging.getLogger("influencerai.instagram")
 MAX_VIDEO_UPLOAD_BYTES = 1_000_000_000
 CONTAINER_POLL_INTERVAL_SECONDS = 5
 MAX_CONTAINER_POLLS = 60
+MAX_PUBLISH_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = (30.0, 90.0)
+# Large single-request uploads are intermittently dropped by Meta's upload proxy.
+MAX_UPLOAD_BYTES_BEFORE_COMPRESSION = 40_000_000
+COMPRESSED_VIDEO_MAXRATE = "6M"
+TRANSIENT_API_CODES = {1, 2, 4, 17, 32, 341, 368, 613}
+
+
+class InstagramError(RuntimeError):
+    """Instagram failure; ``retryable`` marks errors worth retrying with a fresh container."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,17 +151,33 @@ def _graph_request(
         with opener(request, timeout=60) as response:
             payload = _response_json(response)
     except HTTPError as exc:
+        error_code = None
         try:
             error_payload = json.loads(exc.read().decode("utf-8"))
             detail = _api_error_message(error_payload) if isinstance(error_payload, dict) else "API error"
+            if isinstance(error_payload, dict) and isinstance(error_payload.get("error"), dict):
+                error_code = error_payload["error"].get("code")
         except (UnicodeDecodeError, json.JSONDecodeError):
             detail = "API error"
-        raise RuntimeError(f"Instagram Graph API request failed (HTTP {exc.code}; {detail}).") from exc
+        raise InstagramError(
+            f"Instagram Graph API request failed (HTTP {exc.code}; {detail}).",
+            retryable=exc.code >= 500 or _is_transient_api_error(error_code, detail),
+        ) from exc
     except (URLError, TimeoutError, OSError) as exc:
-        raise RuntimeError(f"Instagram Graph API request failed ({type(exc).__name__}).") from exc
+        raise InstagramError(f"Instagram Graph API request failed ({type(exc).__name__}).", retryable=True) from exc
     if "error" in payload:
-        raise RuntimeError(f"Instagram Graph API request failed ({_api_error_message(payload)}).")
+        error = payload["error"]
+        code = error.get("code") if isinstance(error, dict) else None
+        message = _api_error_message(payload)
+        raise InstagramError(
+            f"Instagram Graph API request failed ({message}).",
+            retryable=_is_transient_api_error(code, message),
+        )
     return payload
+
+
+def _is_transient_api_error(code: Any, message: str) -> bool:
+    return code in TRANSIENT_API_CODES or "api access blocked" in message.lower()
 
 
 def _upload_resumable(
@@ -198,13 +228,16 @@ def _upload_resumable(
         if diagnostics:
             _log_upload_response(exc.code, exc.headers)
         detail = _http_error_detail(exc, access_token)
-        raise RuntimeError(f"Instagram Reel upload failed (HTTP {exc.code}; {detail}).") from exc
+        raise InstagramError(
+            f"Instagram Reel upload failed (HTTP {exc.code}; {detail}).",
+            retryable=exc.code >= 500 or "ProcessingFailedError" in detail,
+        ) from exc
     except (URLError, TimeoutError, OSError) as exc:
         if diagnostics:
             LOGGER.warning("Instagram upload diagnostics: transport_error=%s", type(exc).__name__)
-        raise RuntimeError(f"Instagram Reel upload failed ({type(exc).__name__}).") from exc
+        raise InstagramError(f"Instagram Reel upload failed ({type(exc).__name__}).", retryable=True) from exc
     if payload.get("success") is False:
-        raise RuntimeError("Instagram Reel upload was rejected by Meta.")
+        raise InstagramError("Instagram Reel upload was rejected by Meta.", retryable=True)
 
 
 def _log_upload_response(status: int | None, headers: Any) -> None:
@@ -244,7 +277,9 @@ def _wait_until_ready(
             return
         if status in {"ERROR", "EXPIRED"}:
             detail = payload.get("status", "no status details")
-            raise RuntimeError(f"Instagram Reel container processing ended with {status}: {detail}")
+            raise InstagramError(
+                f"Instagram Reel container processing ended with {status}: {detail}", retryable=True
+            )
         if poll_number + 1 < max_polls:
             sleep(poll_interval)
     raise TimeoutError(f"Instagram Reel container {container_id} was not ready after {max_polls} checks.")
@@ -316,6 +351,66 @@ def prepare_reel(
     return container_id
 
 
+def _fit_video_for_upload(video_path: Path, settings: Settings) -> Path:
+    """Return a smaller re-encoded copy when the MP4 is large enough to risk upload rejection."""
+    if video_path.stat().st_size <= MAX_UPLOAD_BYTES_BEFORE_COMPRESSION:
+        return video_path
+    from influencerai.utils.ffmpeg_utils import resolve_ffmpeg, run_ffmpeg
+
+    compressed = video_path.with_name("instagram-reel.mp4")
+    LOGGER.warning(
+        "Reel MP4 is %.1f MB; re-encoding a smaller copy for Instagram upload.", video_path.stat().st_size / 1_000_000
+    )
+    run_ffmpeg(
+        resolve_ffmpeg(settings.ffmpeg_path),
+        [
+            "-y", "-v", "error", "-i", str(video_path),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
+            "-maxrate", COMPRESSED_VIDEO_MAXRATE, "-bufsize", "12M", "-pix_fmt", "yuv420p",
+            "-c:a", "copy", "-movflags", "+faststart", str(compressed),
+        ],
+        cwd=video_path.parent,
+        stage="Instagram upload compression",
+    )
+    if not compressed.is_file() or compressed.stat().st_size < 1024:
+        raise RuntimeError("Compressed Instagram MP4 was not created or is unexpectedly small.")
+    return compressed
+
+
+def _prepare_reel_with_retries(
+    video_path: Path,
+    caption: str,
+    settings: Settings,
+    *,
+    opener: Callable[..., Any],
+    sleep: Callable[[float], None],
+    poll_interval: float,
+    max_polls: int,
+) -> str:
+    """Retry upload/processing with a fresh container; nothing is published until it succeeds."""
+    for attempt in range(1, MAX_PUBLISH_ATTEMPTS + 1):
+        try:
+            return prepare_reel(
+                video_path,
+                caption,
+                settings,
+                opener=opener,
+                sleep=sleep,
+                poll_interval=poll_interval,
+                max_polls=max_polls,
+            )
+        except InstagramError as exc:
+            if not exc.retryable or attempt >= MAX_PUBLISH_ATTEMPTS:
+                raise
+            delay = RETRY_BACKOFF_SECONDS[min(attempt - 1, len(RETRY_BACKOFF_SECONDS) - 1)]
+            LOGGER.warning(
+                "Instagram upload attempt %d/%d failed (%s); retrying in %.0fs with a new container.",
+                attempt, MAX_PUBLISH_ATTEMPTS, exc, delay,
+            )
+            sleep(delay)
+    raise AssertionError("unreachable")
+
+
 def publish_reel(
     video_path: Path,
     screenplay_path: Path,
@@ -333,8 +428,8 @@ def publish_reel(
     if video_path.suffix.lower() != ".mp4":
         raise ValueError("Instagram Reels publishing requires an MP4 video.")
     screenplay = load_screenplay(screenplay_path)
-    container_id = prepare_reel(
-        video_path,
+    container_id = _prepare_reel_with_retries(
+        _fit_video_for_upload(video_path, settings),
         build_caption(screenplay, screenplay_path),
         settings,
         opener=opener,

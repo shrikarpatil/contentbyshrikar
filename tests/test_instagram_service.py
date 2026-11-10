@@ -18,6 +18,7 @@ from influencerai.config.settings import Settings
 from influencerai.schemas.screenplay import Screenplay
 from influencerai.services.instagram_service import (
     _http_error_detail,
+    _fit_video_for_upload,
     _upload_resumable,
     prepare_reel,
     publish_reel,
@@ -254,6 +255,112 @@ class InstagramServiceTests(unittest.TestCase):
                 publish_reel(video_path, screenplay_path, settings, opener=fake_opener)
 
             self.assertNotIn(settings.instagram_access_token, str(caught.exception))
+
+    def test_transient_upload_failure_retries_with_new_container_before_publishing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_path = root / "final.mp4"
+            video_path.write_bytes(b"mock-mp4-content")
+            screenplay_path = sample_screenplay_path(root)
+            settings = replace(
+                Settings.from_env(project_root=root),
+                instagram_access_token="fake-access-token",
+                instagram_user_id="123456789012345",
+            )
+            body = b'{"debug_info":{"retriable":false,"type":"ProcessingFailedError"}}'
+            uploads = 0
+            requests = []
+
+            def fake_opener(request, timeout):
+                nonlocal uploads
+                requests.append(request)
+                path = urlparse(request.full_url).path
+                if path.endswith("/media"):
+                    container = f"container-{len([r for r in requests if r.full_url.endswith('/media')])}"
+                    return FakeResponse({"id": container, "uri": f"https://rupload.facebook.com/ig-api-upload/v27.0/{container}"})
+                if urlparse(request.full_url).hostname == "rupload.facebook.com":
+                    uploads += 1
+                    if uploads == 1:
+                        raise HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(body))
+                    return FakeResponse({"success": True})
+                if path.endswith("/media_publish"):
+                    return FakeResponse({"id": "media-9"})
+                return FakeResponse({"status_code": "FINISHED", "permalink": "https://www.instagram.com/reel/x/"})
+
+            sleep = Mock()
+            result = publish_reel(video_path, screenplay_path, settings, opener=fake_opener, sleep=sleep, poll_interval=0)
+
+            self.assertEqual(result.container_id, "container-2")
+            self.assertEqual(sum(r.full_url.endswith("/media_publish") for r in requests), 1)
+            sleep.assert_any_call(30.0)
+
+    def test_non_transient_failure_is_not_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_path = root / "final.mp4"
+            video_path.write_bytes(b"mock-mp4-content")
+            screenplay_path = sample_screenplay_path(root)
+            settings = replace(
+                Settings.from_env(project_root=root),
+                instagram_access_token="fake-access-token",
+                instagram_user_id="123456789012345",
+            )
+            calls = 0
+
+            def fake_opener(request, timeout):
+                nonlocal calls
+                calls += 1
+                body = json.dumps({"error": {"code": 190, "message": "Invalid OAuth access token"}}).encode("utf-8")
+                raise HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(body))
+
+            with self.assertRaisesRegex(RuntimeError, "code=190"):
+                publish_reel(video_path, screenplay_path, settings, opener=fake_opener, sleep=Mock())
+            self.assertEqual(calls, 1)
+
+    def test_api_access_blocked_is_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_path = root / "final.mp4"
+            video_path.write_bytes(b"mock-mp4-content")
+            settings = replace(
+                Settings.from_env(project_root=root),
+                instagram_access_token="fake-access-token",
+                instagram_user_id="123456789012345",
+            )
+            calls = 0
+
+            def fake_opener(request, timeout):
+                nonlocal calls
+                calls += 1
+                body = json.dumps({"error": {"code": 200, "message": "API access blocked."}}).encode("utf-8")
+                raise HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(body))
+
+            with self.assertRaisesRegex(RuntimeError, "API access blocked"):
+                from influencerai.services.instagram_service import MAX_PUBLISH_ATTEMPTS, _prepare_reel_with_retries
+
+                _prepare_reel_with_retries(
+                    video_path, "caption", settings, opener=fake_opener, sleep=Mock(), poll_interval=0, max_polls=1
+                )
+            self.assertEqual(calls, MAX_PUBLISH_ATTEMPTS)
+
+    def test_large_video_is_recompressed_before_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_path = root / "final.mp4"
+            video_path.write_bytes(b"x" * 2048)
+            settings = Settings.from_env(project_root=root)
+
+            self.assertEqual(_fit_video_for_upload(video_path, settings), video_path)
+
+            def fake_ffmpeg(_exe, arguments, **_kwargs):
+                Path(arguments[-1]).write_bytes(b"y" * 2048)
+
+            with patch("influencerai.services.instagram_service.MAX_UPLOAD_BYTES_BEFORE_COMPRESSION", 1024), patch(
+                "influencerai.utils.ffmpeg_utils.resolve_ffmpeg", return_value="ffmpeg"
+            ), patch("influencerai.utils.ffmpeg_utils.run_ffmpeg", side_effect=fake_ffmpeg):
+                result = _fit_video_for_upload(video_path, settings)
+
+            self.assertEqual(result.name, "instagram-reel.mp4")
 
     def test_nonstandard_http_error_keeps_redacted_response_and_request_id(self) -> None:
         response_body = json.dumps(

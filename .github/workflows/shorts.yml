@@ -1,10 +1,6 @@
 ﻿name: Generate and upload Short
 
 on:
-  schedule:
-    # 12:13 and 18:43 IST (UTC+5:30); offset from common quarter-hour load peaks
-    - cron: "43 6 * * *"
-    - cron: "13 13 * * *"
   workflow_dispatch:
     inputs:
       privacy:
@@ -60,6 +56,13 @@ jobs:
           key: topic-history-${{ github.run_id }}
           restore-keys: topic-history-
 
+      - name: Restore retention state
+        uses: actions/cache/restore@v4
+        with:
+          path: output/retention
+          key: retention-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: retention-state-
+
       - name: Write YouTube token
         env:
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
@@ -84,6 +87,13 @@ jobs:
         with:
           path: output/topic-history.json
           key: topic-history-${{ github.run_id }}
+
+      - name: Save retention state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/retention
+          key: retention-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Remove token
         if: always()
